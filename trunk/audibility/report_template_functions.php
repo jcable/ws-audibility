@@ -1,0 +1,958 @@
+<?php
+
+function db_login($db, $u, $p)
+{
+  $f = fopen('/etc/default/audibility', 'r');
+  while(!feof($f)) {
+    $line = fgets($f);
+    if(strpos($line, '=') == false)
+	continue;
+    list($key, $value) = explode("=", $line);
+    if($key == $u) $user = trim($value);
+    if($key == $p) $password = trim($value);
+  }
+  $dbconn = pg_connect("host=localhost dbname=$db user=$user password=$password")
+   or die('Could not connect: ' . pg_last_error());
+  return $dbconn;
+}
+
+abstract class Region
+{
+	abstract protected function show_language_header($region_name, $lang);
+	abstract protected function show_language_trailer($icons);
+	abstract protected function show_language_target_area_header($region_name, $lang, $ta, $map);
+	abstract protected function show_language_target_area_trailer($icons);
+	abstract protected function make_url($season, $month, $lang, $ta, $start, $freeze, $score, $s);
+	abstract protected function show_row($start, $s, $class, $url);
+
+	public function show_summary($scores, $region_name, $season, $month, $start_date, $stop_date, $map)
+	{
+	  /* now show the table */
+	  $freeze = $scores["freeze"];
+	  ksort($scores);
+	  foreach($scores as $lang =>$scores_for_ta)
+	  {
+	    if($lang == "freeze")
+		continue;
+	    $licons = array();
+	    $this->show_language_header($region_name, $lang);
+	    foreach($scores_for_ta as $ta =>$scores_for_time)
+	    {
+	      $icons = array();
+	      $this->show_language_target_area_header($region_name, $lang, $ta, $map);
+	      foreach($scores_for_time as $start => $s)
+	      {
+			$score = in_or_out_score($s["avg"], $s["out_avg"]);
+			$pscore = in_or_out_score($s["pavg"], $s["pout_avg"]);
+			if($score == 0)
+			  $class = "nodatarow";
+		    else if($score >= $s["target"])
+		      $class = "goodrow";
+		    else if($s["target"] - $score >= 0.6)
+		      $class = "verybadrow";
+		    else if($pscore < $s["ptarget"])
+		      $class = "badtwicerow";
+		    else
+		      $class = "badrow";
+		    $url = $this->make_url($season, $month, $lang, $ta, $start, $freeze, $score, $s);
+		    $icons += $this->show_row($start, $s, $class, $url);
+	      }
+	      $this->show_language_target_area_trailer($icons);
+	      $licons += $icons;
+	    }
+	    $this->show_language_trailer($licons);
+	  }
+	}
+}
+
+function flush_to_screen()
+{
+  flush();
+}
+
+function fetch_query($query)
+{
+  global $dbconn;
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error().": $query");
+  $obs = pg_fetch_all($result);
+  pg_free_result($result);
+  return $obs;
+}
+
+function get_season($year, $month)
+{
+  date_default_timezone_set('UTC');
+  $d = mktime(0, 0, 0, 1, 1, $year);
+  $seasons = array("April" =>"A", "May" =>"A", "June" =>"A", "July" =>"A",
+ 			 "August" =>"A", "September" =>"A", "October" =>"A",
+			 "November" =>"B", "December" =>"B", "January" =>"B", "February" =>"B", "March" =>"B",
+	1=>"B", 2=>"B", 3=>"B", 4=>"A", 5=>"A", 6=>"A", 7=>"A", 8=>"A", 9=>"A", 10=>"A", 11=>"B", 12=>"B");
+  $season = $seasons[$month];
+  if($season == '')
+  {
+	$x = $month+0;
+	  $season = $seasons[$x];
+  }
+  $dy = array("April" =>0, "May" =>0, "June" =>0, "July" =>0, "August" =>0,
+ 		 "September" =>0, "October" =>0, "November" =>0,
+		 "December" =>0, "January" =>-1, "February" =>-1, "March" =>-1,
+	1=>-1, 2=>-1, 3=>-1, 4=>0, 5=>0, 6=>0, 7=>0, 8=>0, 9=>0, 10=>0, 11=>0, 12=>0
+	);
+  $y = date("y", $d) + $dy[$month];
+  if($y < 10)
+    $y = "0".$y;
+  return $season.$y;
+}
+
+function
+season_month($season, $month_name)
+{
+  $Amonths = array("April" =>1, "May" =>2, "June" =>3, "July" =>4, "August" =>5, "September" =>6, "October" =>7,
+	4=>1, 5=>2, 6=>3, 7=>4, 8=>5, 9=>6, 10=>7);
+  $Bmonths = array("November" =>1, "December" =>2, "January" =>3, "February" =>4, "March" =>5,
+	11=>1, 12=>2, 1=>3, 2=>4, 3=>5);
+  if($season[0] == "A")
+    $month = $Amonths[$month_name];
+  else
+    $month = $Bmonths[$month_name];
+  return $month;
+}
+
+function
+season_dates($season)
+{
+  $y = substr($season, 1)+2000;
+  $dates = array();
+  $y1 = $y; $y2=$y+2;
+  $dates["all"] = explode("\n", `zdump -v -c $y1,$y2 Europe/London`);
+  if($season[0] == "A")
+  {
+	  $dates["start"] = $dates["all"][3];
+	  $dates["end"] = $dates["all"][4];
+  }
+  else
+  {
+	  $dates["start"] = $dates["all"][5];
+	  $dates["end"] = $dates["all"][6];
+  }
+  $s = explode(' ', $dates["start"]);
+  $e = explode(' ', $dates["end"]);
+  $months = array("Jan" =>1, "Feb" =>2, "Mar" =>3, "Apr" =>4, "May" =>5, "Jun" =>6,
+		"Jul" =>7, "Aug" =>8, "Sep" =>9, "Oct" => 10, "Nov" =>11, "Dec" =>12);
+  $dates["start"] = $s[6].'-'.$months[$s[3]].'-'.$s[4];
+  $dates["end"] = $e[6].'-'.$months[$e[3]].'-'.$e[4];
+  return $dates;
+}
+
+function
+query_for_monthly_summary($target_area, $season, $dates, $in_ta)
+{
+  $start_date = $dates->start;
+  $stop_date = $dates->stop;
+  $freeze_date = $dates->freeze;
+  if($in_ta)
+  {
+  	$fq = "";
+	$ff = "";
+  }
+  else
+  {
+  	$fq = ", primary_frequency";
+	$ff = " WHERE o.frequency = ANY(s.primary_frequency)";
+  }
+
+  // this sub query selects the observations for the month and target area
+  $obs_query = "SELECT ob.frequency, ob.\"language\", ob.\"date\", ob.\"time\", ob.o";
+  if($in_ta)
+  	$obs_query .= " FROM parsed_observations ob JOIN ms_use ms USING (stn,language) WHERE status='T'";
+  else
+  	$obs_query .= " FROM parsed_observations ob JOIN ms_use ms USING (stn,language) WHERE status='F'";
+
+  $obs_query .=  " WHERE ob.\"date\" BETWEEN '$start_date' AND '$stop_date'";
+
+  if($freeze_date != "")
+    $obs_query .= " AND ob.row_timestamp <= TIMESTAMP '$freeze_date'";
+
+  // this sub query returns the sla targets for the ta, language and month
+  // for out of target observations we include the primary frequency field
+  $sla_query =
+    "SELECT \"language\", start_time, min(target) AS target $fq FROM sla".
+    " WHERE season = '$season'"." AND target_area = '$target_area'".
+    " AND valid_from <= '$stop_date'".
+    " AND(valid_to IS NULL OR valid_to >= '$start_date')".
+    " GROUP BY \"language\", start_time $fq";
+
+  // this sub query collects the obervations into the sla bins and finds the max score for each bin
+  // for out of target observations we only want observations for primary frequencies
+  $query =
+    " SELECT s.\"language\", s.start_time, target, o.\"date\", max(o.o) AS o"
+    ." FROM($sla_query) AS s LEFT JOIN($obs_query) AS o"
+    ." ON o.\"time\" BETWEEN s.start_time AND(s.start_time + '00:30:00'::interval)"
+    ." AND s.\"language\" = o.\"language\""
+	.$ff
+    ." GROUP BY s.\"language\", s.start_time, s.target, o.\"date\"";
+
+  // this sub query calculates the average score
+  $query =
+    "SELECT '$target_area', \"language\", start_time, target, round(avg(o), 1) AS score"
+    ." FROM($query) AS av GROUP BY \"language\", start_time, target"
+    ." ORDER BY \"language\", start_time";
+	//print "<PRE>$query</PRE>";
+ return $query;
+}
+
+function
+create_saved_monthly_summaries_table()
+{
+  global $dbconn;
+  $query =
+    "CREATE TABLE saved_monthly_summaries("
+	."\"language\" text, month date, target_area text,"
+	." start_time time, target float, score float, out_score float, freeze_date date".
+    ")";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+}
+
+function dump_q($query, $title)
+{
+  global $dbconn;
+  print "<h3>$title</h3>";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error().": $query");
+  for($i=0; $i<pg_num_rows($result); $i++) {
+	$line = pg_fetch_array($result, null, PGSQL_ASSOC);
+	print_r($line);
+	print "<p>";
+  }
+  pg_free_result($result);
+}
+
+function count_rows($dbconn,$tab)
+{
+  $result = pg_query($dbconn, "SELECT COUNT(*) AS n FROM $tab");
+  $line = pg_fetch_array($result, null, PGSQL_ASSOC);
+  print "<p>$tab has ".$line['n']." rows<p>\n";
+  pg_free_result($result);
+}
+
+function
+save_monthly_summary($dbconn, $season, $dates)
+{
+  $start_date = $dates->start;
+  $stop_date = $dates->stop;
+  $freeze_date = $dates->freeze;
+
+  $sla_query =
+    //"SELECT target_area, language, start_time, min(target) AS target,"
+    "SELECT target_area, language, start_time, max(target) AS target"
+	//.", primary_frequency, secondary_frequency"
+	." FROM sla"
+    ." WHERE season = '$season'"
+    ." AND valid_from <= '$stop_date'"
+    ." AND(valid_to IS NULL OR valid_to >= '$start_date')"
+    ." GROUP BY target_area, language, start_time"
+    //." , start_time, primary_frequency, secondary_frequency"
+	;
+
+  $query = "CREATE TEMPORARY TABLE m_sla AS $sla_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating SLA/Period List"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  //count_rows($dbconn,"m_sla");
+  $query = "CREATE INDEX m_sla_i ON m_sla(start_time,language)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  $query = "CREATE TEMPORARY TABLE m_sum (LIKE saved_monthly_summaries)";
+  //print "<PRE>$query;\n</PRE>";
+  flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "INSERT INTO m_sum SELECT target_area, language, start_time, target,"
+  ." TO_DATE('$start_date','YYYY-MM-DD') AS month,"
+  ." NULL as score, NULL AS out_score,"
+  ." TO_DATE('$freeze_date','YYYY-MM-DD') AS freeze_date FROM m_sla";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Create structure for scores"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  //count_rows($dbconn,"m_sum");
+
+  $obs_query =
+    "SELECT (extract(hour from time)||':'||30*floor(extract(minute from time)/30))::time AS start_time,"
+    ." language, frequency, date, time, stn, o::double precision"
+    ." FROM parsed_observations ob"
+    ." WHERE ob.\"date\" BETWEEN '$start_date' AND '$stop_date'";
+	//$obs_query .= " AND language='Farsi'";
+  if($freeze_date != "")
+    $obs_query .= " AND ob.row_timestamp <= TIMESTAMP '$freeze_date'";
+  $query = "CREATE TEMPORARY TABLE m_obs AS $obs_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of observations";
+  flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_obs_i ON m_obs(stn,language)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  //count_rows($dbconn,"m_obs");
+
+  $in_obs_query =
+    "SELECT target_area, language, start_time, frequency, date, time, stn, o"
+    ." FROM m_obs ob JOIN ms_use USING (stn,language) WHERE status='T'";
+  $query = "CREATE TEMPORARY TABLE m_in_obs AS $in_obs_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of in-target observations"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_in_obs_i ON m_in_obs(stn,language)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_in_obs_j ON m_in_obs(start_time,language)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  //count_rows($dbconn,"m_in_obs");
+
+  $s_in_query =
+    " SELECT s.target_area as sla_ta, s.language, s.start_time,"
+    ." frequency, stn, o.target_area as o_ta, o.date, o"
+    ." FROM m_sla AS s LEFT JOIN m_in_obs AS o"
+	." USING(start_time,language)"
+    //." ON o.\"time\" BETWEEN s.start_time AND(s.start_time + '00:30:00'::interval)"
+    //." AND s.\"language\" = o.\"language\""
+	//." WHERE o.frequency = ANY(s.primary_frequency) OR o.frequency = ANY(s.secondary_frequency)"
+    ." ORDER BY s.target_area, \"language\", start_time";
+
+  $query = "CREATE TEMPORARY TABLE m_s_in AS $s_in_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of in target observations by slot"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_s_in_i ON m_s_in(sla_ta, language, start_time, date)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  $in_query =
+    "SELECT sla_ta as target_area, language, start_time, avg(o)::double precision AS score"
+    ." FROM("
+        ." SELECT sla_ta, language, start_time, date, max(o) AS o"
+        ." FROM m_s_in AS s WHERE sla_ta = o_ta"
+        ." GROUP BY sla_ta, language, start_time, date"
+    ." ) AS av GROUP BY sla_ta, language, start_time ORDER BY language, start_time";
+
+  $query = "CREATE TEMPORARY TABLE m_in AS $in_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of in target scores"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error().": $query");
+  pg_free_result($result);
+
+  //count_rows($dbconn,"m_in");
+
+  //dump_q("SELECT * FROM m_sum WHERE language='Farsi'", "summary before adding in scores");
+  $query = "UPDATE m_sum SET score = round(s.score::numeric,1) FROM m_in s"
+  ." WHERE"
+  ." m_sum.target_area=s.target_area"
+  ." AND m_sum.language=s.language"
+  ." AND m_sum.start_time=s.start_time";
+  print "\n<p>".date("H:i:s")." Copying in target scores to monthly summary"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  $out_obs_query =
+    "SELECT target_area, language, start_time, frequency, date, time, stn, o"
+    ." FROM m_obs ob JOIN ms_use USING (stn,language) WHERE status='F'";
+  $query = "CREATE TEMPORARY TABLE m_out_obs AS $out_obs_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of out of target observations"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_obs_out_i ON m_out_obs(time,language)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_out_obs_j ON m_out_obs(start_time,language)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  $s_out_query =
+    " SELECT s.target_area as sla_ta, s.language, s.start_time,"
+    ." frequency, stn, o.target_area as o_ta, o.date, o"
+    ." FROM m_sla AS s LEFT JOIN m_out_obs AS o"
+	." USING(start_time,language)"
+    //." ON o.time BETWEEN s.start_time AND(s.start_time + '00:30:00'::interval)"
+    //." AND s.language = o.language"
+	//." WHERE o.frequency = ANY(s.primary_frequency) OR o.frequency = ANY(s.secondary_frequency)"
+    ." ORDER BY s.target_area, language, start_time";
+
+  $query = "CREATE TEMPORARY TABLE m_s_out AS $s_out_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of out-target observations by slot"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  $query = "CREATE INDEX m_s_out_i ON m_s_out(sla_ta, language, start_time, date)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  $out_query =
+    "SELECT sla_ta as target_area, language, start_time, avg(o)::double precision AS score"
+    ." FROM("
+        ." SELECT sla_ta, language, start_time, date, max(o) AS o"
+        ." FROM m_s_out AS s WHERE sla_ta = o_ta"
+        ." GROUP BY sla_ta, language, start_time, date"
+    ." ) AS av GROUP BY sla_ta, language, start_time ORDER BY language, start_time";
+
+  $query = "CREATE TEMPORARY TABLE m_out AS $out_query";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Creating table of out of target scores"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error().": $query");
+  pg_free_result($result);
+
+  //count_rows($dbconn,"m_out");
+
+  //dump_q("SELECT * FROM m_in", "In scores");
+  //dump_q("SELECT * FROM m_sum WHERE language='Farsi'", "summary after adding out scores");
+  //dump_q("SELECT * FROM m_out", "Out scores");
+
+  $query = "UPDATE m_sum SET out_score = round(s.score::numeric,1) FROM m_out s"
+  ." WHERE"
+  ." m_sum.target_area=s.target_area"
+  ." AND m_sum.language=s.language"
+  ." AND m_sum.start_time=s.start_time";
+  //print "<PRE>$query;\n</PRE>";
+  print "\n<p>".date("H:i:s")." Copying out of target scores to monthly summary"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  $query = "DELETE FROM saved_monthly_summaries WHERE month = '$start_date'";
+  //print "<PRE>$query;\n</PRE>";
+  flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  //count_rows($dbconn,"m_sum");
+
+  $query = "INSERT INTO saved_monthly_summaries SELECT * from m_sum ORDER BY target_area,language,start_time";
+  //print "<PRE>$query;\n</PRE>"; flush_to_screen(); 
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+  print "\n<p>".date("H:i:s")." Done</br>\n";
+  flush_to_screen(); 
+}
+
+function
+fetch_region_summary($dbconn, &$scores, $region, $season, $dates, $map, $which)
+{
+  global $dbconn;
+	if($which=="current")
+		$is_current = true;
+	else
+		$is_current = false;
+
+	$freeze = "";
+	$query = "SELECT * FROM ta_regions WHERE region = '".$region->name."'";
+	$result0 = pg_query($dbconn, $query) or die('Query failed: ' . pg_last_error().": $query");
+	for($l=0; $l<pg_num_rows($result0); $l++)
+	{
+		$line = pg_fetch_array($result0, null, PGSQL_ASSOC);
+		$target_area = $line["target_area"];
+		$lang = $line["language"];
+		$query = "SELECT * FROM saved_monthly_summaries"
+				." WHERE month = '$dates->start' AND target_area = '$target_area'"
+				." AND \"language\" = '$lang'"
+				." ORDER BY start_time";
+		$result = pg_query($dbconn, $query) or die('Query failed: ' . pg_last_error().": $query");
+		for($i=0; $i<pg_num_rows($result); $i++)
+		{
+			$line = pg_fetch_array($result, null, PGSQL_ASSOC);
+			//print_r($line); print " $which<p>";
+			if($is_current)
+			{
+				$o = array("target"=>$line["target"], "avg"=>$line["score"], "out_avg" => $line["out_score"]);
+			}
+			else
+			{
+				$o = array("ptarget"=>$line["target"], "pavg"=>$line["score"], "pout_avg" => $line["out_score"]);
+			}
+			$start = $line["start_time"];
+			$freeze = $line["freeze_date"];
+			if(isset($scores[$lang][$target_area][$start]))
+				$scores[$lang][$target_area][$start] = array_merge($scores[$lang][$target_area][$start], $o);
+			else
+				$scores[$lang][$target_area][$start] = $o;
+		}
+		pg_free_result($result);
+	}
+	$scores["freeze"] = $freeze;
+}
+
+function
+create_region_summary($region, $season, $dates, $map)
+{
+  global $dbconn;
+  $scores = array();
+  foreach($region->tas as $ta)
+  {
+    $target_area = $map[$ta]->name;
+    $query = query_for_monthly_summary($target_area, $season, $dates, true);
+    unset($result);
+    //print "<PRE>In Target $target_area\n</PRE>";
+    //print "<PRE>$query\n</PRE>";
+    $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+    for($i = 0; $i < pg_num_rows($result); $i++)
+    {
+		$line = pg_fetch_array($result, null, PGSQL_ASSOC);
+		$start = $line["start_time"];
+		$lang = $line["language"];
+		$scores[$lang][$ta][$start]["avg"] = $line["score"];
+		$scores[$lang][$ta][$start]["target"] = $line["target"];
+    }
+    pg_free_result($result);
+
+    unset($result);
+    $query = query_for_monthly_summary($target_area, $season, $dates, false);
+    //print "<PRE>Out of Target ".$target_area."\n</PRE>";
+    //print "<PRE>$query\n</PRE>";
+    $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+    for($i = 0; $i < pg_num_rows($result); $i++)
+    {
+		$line = pg_fetch_array($result, null, PGSQL_ASSOC);
+		$start = $line["start_time"];
+		$lang = $line["language"];
+		$avg = $line["score"];
+		$scores[$lang][$ta][$start]["out_avg"] = $avg;
+    }
+    pg_free_result($result);
+  }
+  return $scores;
+}
+
+function in_or_out_score($in, $out)
+{
+	if(is_numeric($in))
+	{
+		$score = $in;
+	}
+	else
+	{
+		if(is_numeric($out))
+	    {
+			$score = $out;
+		}
+		else
+		{
+		    $score = 0;
+		}
+	}
+	return $score;
+}
+
+
+function
+show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_date, $map)
+{
+  /* now show the table */
+  $freeze = $scores["freeze"];
+  ksort($scores);
+  foreach($scores as $lang =>$scores_for_ta)
+  {
+    if($lang == "freeze")
+	continue;
+    $licons = array();
+    show_language_header($region_name, $lang);
+    foreach($scores_for_ta as $ta =>$scores_for_time)
+    {
+      $icons = array();
+      show_language_target_area_header($region_name, $lang, $ta, $map);
+      foreach($scores_for_time as $start => $s)
+      {
+	  	$score = in_or_out_score($s["avg"], $s["out_avg"]);
+	  	$pscore = in_or_out_score($s["pavg"], $s["pout_avg"]);
+		if($score == 0)
+		  $class = "nodatarow";
+	    else if($score >= $s["target"])
+	      $class = "goodrow";
+	    else if($s["target"] - $score >= 0.6)
+	      $class = "verybadrow";
+	    else if($pscore < $s["ptarget"])
+	      $class = "badtwicerow";
+	    else
+	      $class = "badrow";
+	    $url = make_detail_url($season, $month, $lang, $ta, $start, $freeze, $score, $s);
+	    $icons += show_row($start, $s, $class, $url);
+      }
+      show_language_target_area_trailer($icons);
+      $licons += $icons;
+    }
+    show_language_trailer($licons);
+  }
+}
+
+function
+get_season_dates($season)
+{
+  $half = substr($season,0,1);
+  $year = substr($season,1);
+  $start_date = gmmktime(0,0,0,(($half=="A")?6:12),1,2000+$year);
+  $timezone = new DateTimeZone("Europe/London");
+  $tt = 0;
+  $stop_date = 0;
+  foreach($timezone->getTransitions() as $t)
+  {
+	$ts = $t["ts"];
+	if($ts<$start_date)
+	{
+		if($ts>$tt)
+			$tt = $ts;
+	}
+	if($stop_date == 0 && $ts>$start_date)
+	{
+		$stop_date = $ts - 86400;
+	}
+  }
+  $q->start_date = gmdate("Y-m-d", $tt);
+  $q->stop_date = gmdate("Y-m-d", $stop_date);
+  return $q;
+}
+
+function
+get_times($season, $month)
+{
+  $half = substr($season,0,1);
+  $year = substr($season,1);
+  switch($month)
+  {
+  case 1:
+  	$q->start_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month,1,2000+$year);
+	$timezone = new DateTimeZone("Europe/London");
+	$tt = 0;
+	foreach($timezone->getTransitions() as $t)
+	{
+		$ts = $t["ts"];
+		if($ts<$q->start_date)
+		{
+			if($ts>$tt)
+				$tt = $ts;
+		}
+  	}
+	$q->start_date = $tt;
+  	$q->stop_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month+1,1,2000+$year) - 86400;
+  	break;
+  case 5:
+  	$q->start_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month,1,2000+$year);
+    if($half=="B")
+	{
+		$timezone = new DateTimeZone("Europe/London");
+		$q->stop_date = 0;
+		foreach($timezone->getTransitions() as $t)
+		{
+			$ts = $t["ts"];
+			if($ts>$q->start_date)
+			{
+				$q->stop_date = $ts - 86400;
+				break;
+			}
+		}
+	}
+	else
+	{
+  		$q->stop_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month+1,1,2000+$year) - 86400;
+	}
+  	break;
+  case 7:
+  	$q->start_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month,1,2000+$year);
+	$timezone = new DateTimeZone("Europe/London");
+	$q->stop_date = 0;
+	foreach($timezone->getTransitions() as $t)
+	{
+		$ts = $t["ts"];
+		if($ts>$q->start_date)
+		{
+			$q->stop_date = $ts - 86400;
+			break;
+		}
+  	}
+	break;
+  default:
+  	$q->start_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month,1,2000+$year);
+  	$q->stop_date = gmmktime(0,0,0,(($half=="A")?3:10)+$month+1,1,2000+$year) - 86400;
+  	break;
+  }
+  $q->month_name = gmdate("F Y", (15*86400)+$q->start_date);
+  $q->start_date = gmdate("Y-m-d", $q->start_date);
+  $q->stop_date = gmdate("Y-m-d", $q->stop_date);
+  return $q;
+}
+
+function
+get_regions()
+{
+  global $dbconn;
+	$regions = array();
+	$query = 'SELECT * FROM "Region Reporting Order" ORDER BY "order"';
+	$result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+	for($i = 0; $i < pg_num_rows($result); $i++)
+	{
+		$line = pg_fetch_array($result, null, PGSQL_ASSOC);
+		$reg = $line["order"] + 0;
+		$name = $line["name"];
+		$regions[$reg]->name = $name;
+	}
+	pg_free_result($result);
+	return $regions;
+}
+
+function
+get_target_areas()
+{
+  global $dbconn;
+  $map = array();
+  $query = 'SELECT id,name,abbr FROM target_areas';
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  for($i = 0; $i < pg_num_rows($result); $i++)
+    {
+      $line = pg_fetch_array($result, null, PGSQL_ASSOC);
+      $id = trim($line["id"]);
+      $name = trim($line["name"]);
+      $map[$id] =(object) array('id' =>$id, 'name' =>$name, 'abbr' =>trim($line["abbr"]));
+      $map[$name] =(object) array('id' =>$id, 'name' =>$name, 'abbr' =>trim($line["abbr"]));
+    }
+  pg_free_result($result);
+  return $map;
+}
+
+function
+report_and_correct_sla_errors()
+{
+  global $dbconn;
+  $query =
+    "UPDATE sla SET target_area =( SELECT to_ta FROM ta_translations WHERE from_ta = target_area)";
+  $query .=
+    "WHERE EXISTS( SELECT from_ta FROM ta_translations WHERE from_ta = target_area)";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  $n = pg_affected_rows($result);
+  if($n > 0)
+    {
+      print "<H2>Errors found.</H2>";
+      print "$n entries were using known mis-spellings of the target areas.";
+      print "<p>These have been corrected<p>";
+      $errors = true;
+    }
+  pg_free_result($result);
+  $query =
+    'SELECT DISTINCT target_area FROM sla EXCEPT SELECT name FROM target_areas';
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  if(pg_num_rows($result) > 0)
+    {
+      if(!isset($errors))
+	print "<H2>Errors found.</H2>";
+      print "The following Target Areas in the sla table are unknown:<p>";
+      $sep = "";
+      for($i = 0; $i < pg_num_rows($result); $i++)
+	{
+	  $line = pg_fetch_array($result, null, PGSQL_ASSOC);
+	  print $sep.$line["target_area"];
+	  $sep = ", ";
+	}
+    }
+  pg_free_result($result);
+}
+
+
+function
+show_html_table($title, $id, $query)
+{
+  global $dbconn;
+  $data = array();
+  print "<div class='tabtitle'>$title</div>\n";
+  print "<TABLE id='$id' class='sortable'>";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  $n = pg_num_fields($result);
+  print "<TR>";
+  for($j = 0; $j < $n; $j++)
+    {
+      print "<TH>".pg_field_name($result, $j)."</TH>";
+    }
+  print "</TR>";
+  for($i = 0; $i < pg_num_rows($result); $i++)
+    {
+      print "<TR>";
+      $line = pg_fetch_row($result);
+      $data[] = $line;
+      for($j = 0; $j < $n; $j++)
+	{
+	  print "<TD>".$line[$j]."</TD>\n";
+	}
+      print "</TR>";
+    }
+  pg_free_result($result);
+  print "</TABLE>";
+  return $data;
+}
+
+function
+show_array_in_html_table($title, $id, $data)
+{
+  print "<div class='tabtitle'>$title</div>\n";
+  print "<TABLE id='$id' class='sortable'>";
+  print "<TR>";
+  foreach(array_keys($data[0]) as $name)
+  {
+    print "<TH>$name</TH>";
+  }
+  print "</TR>";
+  foreach($data as $row)
+  {
+    print "<TR>";
+    foreach($row as $name =>$val)
+    {
+      print "<TD>$val</TD>\n";
+    }
+    print "</TR>";
+  }
+  print "</TABLE>";
+}
+
+
+function make_detail_url($season, $month, $lang, $ta, $start, $freeze, $score, $s)
+{
+        $url = "detail.php?ta=$ta&season=$season&month=$month&language=$lang";
+        $url .= "&start=$start&target=".$s["target"]."&score=$score";
+        if($freeze!="")
+                $url .="&freeze=$freeze";
+        return $url;
+}
+
+function query_for_detail($investigation, $start_date, $stop_date, $freeze, $in)
+{
+  $ta = $investigation["tan"];
+  $language = $investigation["language"];
+  $start_time = $investigation["start"];
+  $query =
+    "SELECT"
+    ." TO_CHAR(date,'dd') as \"date\", TO_CHAR(time,'HH24:MI') as \"time\","
+    ." frequency, ob.stn, s, d, o, TO_CHAR(row_timestamp, 'DD-MM-YYYY') AS row_timestamp"
+    ." FROM parsed_observations ob JOIN ms_use ms USING (stn,language)"
+    ." WHERE ob.\"language\" = '$language'"
+    ." AND target_area = '$ta'"
+    ." AND status = '$in'"
+    ." AND \"date\" BETWEEN '$start_date' AND '$stop_date'"
+    ." AND ob.time BETWEEN '$start_time' AND('$start_time' + '00:30:00'::interval)";
+	if($freeze != "")
+		$query ." AND ob.row_timestamp <= TIMESTAMP '$freeze'";
+    $query .= " ORDER BY \"date\", o DESC";
+	return $query;
+}
+
+function show_detail($investigation, $start_date, $stop_date, $month_name, $freeze, $obs)
+{
+  if(!is_array($obs))
+  {
+  	show_detail_header($investigation, $start_date, $stop_date, $month_name);
+    	show_detail_trailer($investigation);
+  	return 0;
+  }
+  show_detail_header($investigation, $start_date, $stop_date, $month_name);
+  $date = "";
+  $count = 0;
+  $sum = 0;
+  foreach($obs as $line)
+  {
+      if($date != $line["date"])
+	{
+	  $line["best"] = 1;
+	  $date = $line["date"];
+	  $sum += $line["o"];
+	  $count++;
+	}
+      else
+	{
+	  $line["best"] = 0;
+	}
+      show_detail_row($line);
+  }
+  if($count > 0)
+    {
+      $score = round($sum / $count, 1);
+      show_detail_score($score);
+    }
+  else
+    {
+      $score = -1;
+    }
+  show_detail_trailer($investigation);
+  return $score;
+}
+
+function get_investigations($tracconn, $month, $season, $map)
+{
+	$report_id = $month.$season;
+	$trac_query = "SELECT"
+		. " ticket.id as ticket_id,"
+		. " ticket.type as action,"
+		. " ticket.summary as summary,"
+		. " ticket.description as notes"
+		. " FROM ticket JOIN ticket_custom ON ticket.id = ticket_custom.ticket"
+		. " WHERE ticket_custom.name = 'report_id'"
+		. " AND ticket_custom.value = '$report_id'";
+	$summary_pg_query = pg_query($tracconn, $trac_query) or die('Query failed: ' .pg_last_error());
+	$investigations = array();
+	for($i=0; $i<pg_num_rows($summary_pg_query); $i++)
+	{
+		$investigation = pg_fetch_array($summary_pg_query, null, PGSQL_ASSOC);
+		// add detail from custom_ticket table
+		$id = $investigation["ticket_id"];
+		$query = "SELECT name, value FROM ticket_custom WHERE ticket = $id";
+		$result = pg_query($tracconn, $query) or die('Query failed: ' . pg_last_error());
+		for($j=0; $j<pg_num_rows($result); $j++)
+		{
+			$line = pg_fetch_array($result, null, PGSQL_ASSOC);
+			if($line["name"] == 'language')
+				$investigation["language"] = $line["value"];
+			if($line["name"] == 'target_area')
+			{
+				$investigation["ta_name"] = $line["value"];
+				$investigation["tan"] = $line["value"];
+				$investigation["ta_abbr"] = $map[$line["value"]]->abbr;
+				$investigation["ta"] = $map[$line["value"]]->id;
+			}
+			if($line["name"] == 'timeslot')
+				$investigation["start"] = $line["value"];
+		}
+		pg_free_result($result);
+		$investigations[$id] = $investigation;
+	}
+	pg_free_result($summary_pg_query);
+	return $investigations;
+}
+
+function last_month($start_date, $month, $season)
+{
+	$d = strptime($start_date, '%Y-%m-%d');
+	$m = $d["tm_mon"]; $y = $d["tm_year"];
+	if($m==0)
+	{
+		$d["tm_mon"] == 11;
+		$d["tm_year"]--;
+	}
+	else
+	{
+		$d["tm_mon"]--;
+	}
+	if($month == 1)
+	{
+		if(substr($season, 0, 1) == 'A')
+		{
+			$other_season = sprintf("B%02d", substr($season, 1)-1);
+			$other_month = 5;
+		} else {
+			$other_season = sprintf("A%02d", substr($season, 1));
+			$other_month = 7;
+		}
+	}
+	else
+	{
+		$other_season = $season;
+		$other_month = $month - 1;
+	}
+	return array("season" => $other_season, "month" => $other_month);
+}
+?>
