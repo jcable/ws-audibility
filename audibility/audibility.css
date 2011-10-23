@@ -1,0 +1,9 @@
+.nodatarow {background-color: #CFCFCF;}
+.goodrow {background-color: #90EE90;}
+.goodrowout {background-color: #FFAFAF;}
+.verybadrow {background-color: #FF8080;}
+.badtwicerow {background-color: #FFB03B;}
+.badrow {background-color: #FFDAB9;}
+.usedrow {font-weight:bold;}
+.unusedrow {color: #3f3f3f;}
+.tabtitle {text-align:centre;font-weight:bold}

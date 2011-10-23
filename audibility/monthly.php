@@ -91,7 +91,7 @@ function show_row($start, $s, $class, $url)
 
 // Connecting, selecting database
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-$tracconn = db_login('wsdata', 'TRAC_USER', 'TRAC_PASSWORD');
+$tracconn = db_login('trac', 'TRAC_USER', 'TRAC_PASSWORD');
 
 $freeze = gmdate('Y-m-d');
 $year = gmdate('Y');
