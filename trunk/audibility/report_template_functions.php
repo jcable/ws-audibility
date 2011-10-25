@@ -1,5 +1,14 @@
 <?php
 
+function make_detail_url($season, $month, $language, $ta, $start, $freeze, $score, $target)
+{
+        $url = "detail.php?ta=$ta&season=$season&month=$month&language=$language";
+        $url .= "&start=$start&target=".$target."&score=$score";
+        if($freeze!="")
+                $url .="&freeze=$freeze";
+        return $url;
+}
+
 function db_login($db, $u, $p)
 {
   $f = fopen('/etc/default/audibility', 'r');
@@ -86,7 +95,9 @@ function get_season($year, $month)
   $seasons = array("April" =>"A", "May" =>"A", "June" =>"A", "July" =>"A",
  			 "August" =>"A", "September" =>"A", "October" =>"A",
 			 "November" =>"B", "December" =>"B", "January" =>"B", "February" =>"B", "March" =>"B",
-	1=>"B", 2=>"B", 3=>"B", 4=>"A", 5=>"A", 6=>"A", 7=>"A", 8=>"A", 9=>"A", 10=>"A", 11=>"B", 12=>"B");
+    '01'=>"B", '02'=>"B", '03'=>"B", '04'=>"A", '05'=>"A", '06'=>"A", '07'=>"A", '08'=>"A", '09'=>"A", '10'=>"A", '11'=>"B", '12'=>"B",
+	1=>"B", 2=>"B", 3=>"B", 4=>"A", 5=>"A", 6=>"A", 7=>"A", 8=>"A", 9=>"A", 10=>"A", 11=>"B", 12=>"B"
+  );
   $season = $seasons[$month];
   if($season == '')
   {
@@ -96,6 +107,7 @@ function get_season($year, $month)
   $dy = array("April" =>0, "May" =>0, "June" =>0, "July" =>0, "August" =>0,
  		 "September" =>0, "October" =>0, "November" =>0,
 		 "December" =>0, "January" =>-1, "February" =>-1, "March" =>-1,
+	'01'=>-1, '02'=>-1, '03'=>-1, '04'=>0, '05'=>0, '06'=>0, '07'=>0, '08'=>0, '09'=>0, '10'=>0, '11'=>0, '12'=>0,
 	1=>-1, 2=>-1, 3=>-1, 4=>0, 5=>0, 6=>0, 7=>0, 8=>0, 9=>0, 10=>0, 11=>0, 12=>0
 	);
   $y = date("y", $d) + $dy[$month];
@@ -108,8 +120,10 @@ function
 season_month($season, $month_name)
 {
   $Amonths = array("April" =>1, "May" =>2, "June" =>3, "July" =>4, "August" =>5, "September" =>6, "October" =>7,
+	'04'=>1, '05'=>2, '06'=>3, '07'=>4, '08'=>5, '09'=>6, '10'=>7,
 	4=>1, 5=>2, 6=>3, 7=>4, 8=>5, 9=>6, 10=>7);
   $Bmonths = array("November" =>1, "December" =>2, "January" =>3, "February" =>4, "March" =>5,
+	'11'=>1, '12'=>2, '01'=>3, '02'=>4, '03'=>5,
 	11=>1, 12=>2, 1=>3, 2=>4, 3=>5);
   if($season[0] == "A")
     $month = $Amonths[$month_name];
@@ -145,58 +159,50 @@ season_dates($season)
 }
 
 function
-query_for_monthly_summary($target_area, $season, $dates, $in_ta)
+query_for_month($language, $target_area, $season, $start_date, $stop_date, $freeze_date, $status)
 {
-  $start_date = $dates->start;
-  $stop_date = $dates->stop;
-  $freeze_date = $dates->freeze;
-  if($in_ta)
-  {
-  	$fq = "";
-	$ff = "";
-  }
-  else
-  {
-  	$fq = ", primary_frequency";
-	$ff = " WHERE o.frequency = ANY(s.primary_frequency)";
-  }
 
-  // this sub query selects the observations for the month and target area
-  $obs_query = "SELECT ob.frequency, ob.\"language\", ob.\"date\", ob.\"time\", ob.o";
-  if($in_ta)
-  	$obs_query .= " FROM parsed_observations ob JOIN ms_use ms USING (stn,language) WHERE status='T'";
-  else
-  	$obs_query .= " FROM parsed_observations ob JOIN ms_use ms USING (stn,language) WHERE status='F'";
-
-  $obs_query .=  " WHERE ob.\"date\" BETWEEN '$start_date' AND '$stop_date'";
-
+  // this sub query selects the observations for the month, language and target area
+  $obs_query = "SELECT ob.frequency, ob.\"date\", ob.\"time\", ob.o"
+              ." FROM parsed_observations ob JOIN ms_use ms USING (stn)"
+              ." WHERE status='$status'"
+              ." AND ob.\"date\" BETWEEN '$start_date' AND '$stop_date'"
+ 	      ." AND ob.\"language\" = '$language' AND ms.\"language\" = '$language'";
   if($freeze_date != "")
     $obs_query .= " AND ob.row_timestamp <= TIMESTAMP '$freeze_date'";
 
   // this sub query returns the sla targets for the ta, language and month
-  // for out of target observations we include the primary frequency field
   $sla_query =
-    "SELECT \"language\", start_time, min(target) AS target $fq FROM sla".
-    " WHERE season = '$season'"." AND target_area = '$target_area'".
-    " AND valid_from <= '$stop_date'".
-    " AND(valid_to IS NULL OR valid_to >= '$start_date')".
-    " GROUP BY \"language\", start_time $fq";
+    "SELECT start_time, min(target) AS target, primary_frequency, secondary_frequency FROM sla"
+    ." WHERE season = '$season'"." AND target_area = '$target_area'"
+    ." AND valid_from <= '$stop_date'"
+    ." AND(valid_to IS NULL OR valid_to >= '$start_date')"
+    ." AND \"language\" = '$language'"
+    ." GROUP BY start_time, primary_frequency, secondary_frequency";
 
   // this sub query collects the obervations into the sla bins and finds the max score for each bin
-  // for out of target observations we only want observations for primary frequencies
-  $query =
-    " SELECT s.\"language\", s.start_time, target, o.\"date\", max(o.o) AS o"
+  return
+    " SELECT s.start_time, target, o.\"date\", max(o.o) AS o"
     ." FROM($sla_query) AS s LEFT JOIN($obs_query) AS o"
     ." ON o.\"time\" BETWEEN s.start_time AND(s.start_time + '00:30:00'::interval)"
-    ." AND s.\"language\" = o.\"language\""
-	.$ff
-    ." GROUP BY s.\"language\", s.start_time, s.target, o.\"date\"";
+    ." WHERE (o.frequency = ANY(s.primary_frequency) OR o.frequency = ANY(s.secondary_frequency))"
+    ." GROUP BY s.start_time, s.target, o.\"date\"";
+}
+
+function
+query_for_monthly_summary($language, $target_area, $season, $dates, $status)
+{
+  $start_date = $dates->start;
+  $stop_date = $dates->stop;
+  $freeze_date = $dates->freeze;
+
+  $query = query_for_month($language, $target_area, $season, $start_date, $stop_date, $freeze_date, $status);
 
   // this sub query calculates the average score
   $query =
-    "SELECT '$target_area', \"language\", start_time, target, round(avg(o), 1) AS score"
-    ." FROM($query) AS av GROUP BY \"language\", start_time, target"
-    ." ORDER BY \"language\", start_time";
+    "SELECT '$target_area' as target_area, '$language' as \"language\", start_time, target, round(avg(o), 1) AS score"
+    ." FROM($query) AS av GROUP BY start_time, target"
+    ." ORDER BY start_time";
 	//print "<PRE>$query</PRE>";
  return $query;
 }
@@ -234,8 +240,74 @@ function count_rows($dbconn,$tab)
   pg_free_result($result);
 }
 
+/*
+                 target_area                  | language | start_time | target |   month    | score | out_score | freeze_date
+----------------------------------------------+----------+------------+--------+------------+-------+-----------+-------------
+ Bangladesh Bhutan East India Nepal Sri Lanka | Bengali  | 00:30:00   |    3.6 | 2011-03-01 |     4 |           | 2011-10-22
+*/
+function
+save_monthly_summary_for_timeslot($dbconn, $target_area, $language, $start_time, $target, $season,$start_date,$stop_date,$freeze)
+{
+	$obs_query = query_for_detail($language, $season, $target_area, $start_time, $start_date, $stop_date, $freeze, 'T');
+
+	$query = "INSERT INTO saved_monthly_summaries"
+		." (target_area, language, start_time, target, month, score, freeze_date)"
+		." SELECT '$target_area','$language','$start_time',$target,'$start_date', round(avg(o),1) AS score, '$freeze'"
+		." FROM (SELECT \"date\", max(o) AS o FROM ($obs_query) AS o GROUP BY \"date\") AS d";
+
+//print "$query\n";
+	$result = pg_query($dbconn, $query);
+	pg_free_result($result);
+
+	$obs_query = query_for_detail($language, $season, $target_area, $start_time, $start_date, $stop_date, $freeze, 'F');
+
+	$query = "UPDATE saved_monthly_summaries SET out_score = o"
+		." FROM (SELECT round(avg(o),1) AS o"
+		." FROM (SELECT \"date\", max(o) AS o FROM ($obs_query) AS o GROUP BY \"date\") AS d) AS a"
+		." WHERE \"language\"='$language'"
+		." AND target_area='$target_area'"
+		." AND start_time = '$start_time'"
+		." AND month = '$start_date'";
+
+//print "$query\n";
+	$result = pg_query($dbconn, $query);
+	pg_free_result($result);
+}
+
 function
 save_monthly_summary($dbconn, $season, $dates)
+{
+  $start_date = $dates->start;
+  $stop_date = $dates->stop;
+  $freeze_date = $dates->freeze;
+  $sla_query =
+    "SELECT target_area, language, start_time, max(target) AS target"
+    ." FROM sla"
+    ." WHERE season = '$season'"
+    ." AND valid_from <= '$stop_date'"
+    ." AND(valid_to IS NULL OR valid_to >= '$start_date')"
+    ." GROUP BY target_area, language, start_time";
+  $result = pg_query($dbconn, $sla_query);
+  $groups = pg_fetch_all($result);
+  pg_free_result($result);
+
+  $query = "DELETE FROM saved_monthly_summaries WHERE month = '$start_date'";
+  $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+  pg_free_result($result);
+
+  foreach($groups as $group) {
+	$target_area = $group['target_area'];
+	$language = $group['language'];
+	$start_time = $group['start_time'];
+	$target = $group['target'];
+	print "creating summary for $language in $target_area at $start_time<br>\n";
+	save_monthly_summary_for_timeslot($dbconn, $target_area, $language, $start_time, $target,
+		$season,$start_date,$stop_date,$freeze_date);
+  }
+}
+
+function
+save_monthly_summary1($dbconn, $season, $dates)
 {
   $start_date = $dates->start;
   $stop_date = $dates->stop;
@@ -489,38 +561,46 @@ create_region_summary($region, $season, $dates, $map)
 {
   global $dbconn;
   $scores = array();
+
+  $result = pg_query($dbconn, "SELECT \"Language\" FROM languages") or die('Query failed: '.pg_last_error());
+  $languages = pg_fetch_all($result);
+  pg_free_result($result);
+
   foreach($region->tas as $ta)
   {
     $target_area = $map[$ta]->name;
-    $query = query_for_monthly_summary($target_area, $season, $dates, true);
-    unset($result);
-    //print "<PRE>In Target $target_area\n</PRE>";
-    //print "<PRE>$query\n</PRE>";
-    $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
-    for($i = 0; $i < pg_num_rows($result); $i++)
+    foreach($languages as $language)
     {
+      $query = query_for_monthly_summary($language, $target_area, $season, $dates, 'T');
+      unset($result);
+      //print "<PRE>In Target $target_area\n</PRE>";
+      //print "<PRE>$query\n</PRE>";
+      $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+      for($i = 0; $i < pg_num_rows($result); $i++)
+      {
 		$line = pg_fetch_array($result, null, PGSQL_ASSOC);
 		$start = $line["start_time"];
 		$lang = $line["language"];
 		$scores[$lang][$ta][$start]["avg"] = $line["score"];
 		$scores[$lang][$ta][$start]["target"] = $line["target"];
-    }
-    pg_free_result($result);
+      }
+      pg_free_result($result);
 
-    unset($result);
-    $query = query_for_monthly_summary($target_area, $season, $dates, false);
-    //print "<PRE>Out of Target ".$target_area."\n</PRE>";
-    //print "<PRE>$query\n</PRE>";
-    $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
-    for($i = 0; $i < pg_num_rows($result); $i++)
-    {
+      unset($result);
+      $query = query_for_monthly_summary($language, $target_area, $season, $dates, 'F');
+      //print "<PRE>Out of Target ".$target_area."\n</PRE>";
+      //print "<PRE>$query\n</PRE>";
+      $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
+      for($i = 0; $i < pg_num_rows($result); $i++)
+      {
 		$line = pg_fetch_array($result, null, PGSQL_ASSOC);
 		$start = $line["start_time"];
 		$lang = $line["language"];
 		$avg = $line["score"];
 		$scores[$lang][$ta][$start]["out_avg"] = $avg;
+      }
+      pg_free_result($result);
     }
-    pg_free_result($result);
   }
   return $scores;
 }
@@ -549,6 +629,7 @@ function in_or_out_score($in, $out)
 function
 show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_date, $map)
 {
+
   /* now show the table */
   $freeze = $scores["freeze"];
   ksort($scores);
@@ -576,7 +657,7 @@ show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_d
 	      $class = "badtwicerow";
 	    else
 	      $class = "badrow";
-	    $url = make_detail_url($season, $month, $lang, $ta, $start, $freeze, $score, $s);
+	    $url = make_detail_url($season, $month, $lang, $ta, $start, $freeze, $score, $s["target"]);
 	    $icons += show_row($start, $s, $class, $url);
       }
       show_language_target_area_trailer($icons);
@@ -811,30 +892,30 @@ show_array_in_html_table($title, $id, $data)
   print "</TABLE>";
 }
 
-
-function make_detail_url($season, $month, $lang, $ta, $start, $freeze, $score, $s)
+function query_for_sla($language, $season, $target_area, $start_time, $start_date, $stop_date)
 {
-        $url = "detail.php?ta=$ta&season=$season&month=$month&language=$lang";
-        $url .= "&start=$start&target=".$s["target"]."&score=$score";
-        if($freeze!="")
-                $url .="&freeze=$freeze";
-        return $url;
+        $query = 'SELECT * FROM sla WHERE';
+        $query .= ' "language"='."'$language'";
+        $query .= ' AND season='."'$season'";
+        $query .= " AND target_area='$target_area'";
+        $query .= ' AND start_time='."'$start_time'";
+        $query .= ' AND valid_from <='."'$stop_date'";
+        $query .= " AND (valid_to IS NULL OR valid_to >= '$start_date')";
+	return $query;
 }
 
-function query_for_detail($investigation, $start_date, $stop_date, $freeze, $in)
+function query_for_detail($language, $season, $target_area, $start_time, $start_date, $stop_date, $freeze, $status)
 {
-  $ta = $investigation["tan"];
-  $language = $investigation["language"];
-  $start_time = $investigation["start"];
+  $sla_query = query_for_sla($language, $season, $target_area, $start_time, $start_date, $stop_date);
   $query =
-    "SELECT"
+    "SELECT DISTINCT"
     ." TO_CHAR(date,'dd') as \"date\", TO_CHAR(time,'HH24:MI') as \"time\","
     ." frequency, ob.stn, s, d, o, TO_CHAR(row_timestamp, 'DD-MM-YYYY') AS row_timestamp"
-    ." FROM parsed_observations ob JOIN ms_use ms USING (stn,language)"
+    ." FROM parsed_observations ob JOIN ms_use ms USING (stn,language), ($sla_query) s"
     ." WHERE ob.\"language\" = '$language'"
-    ." AND target_area = '$ta'"
-    ." AND status = '$in'"
-    ." AND \"date\" BETWEEN '$start_date' AND '$stop_date'"
+    ." AND ms.target_area = '$target_area' AND ms.status = '$status'"
+    ." AND ob.\"date\" BETWEEN '$start_date' AND '$stop_date'"
+    ." AND (ob.frequency = ANY(s.primary_frequency) OR ob.frequency = ANY(s.secondary_frequency))"
     ." AND ob.time BETWEEN '$start_time' AND('$start_time' + '00:30:00'::interval)";
 	if($freeze != "")
 		$query ." AND ob.row_timestamp <= TIMESTAMP '$freeze'";
