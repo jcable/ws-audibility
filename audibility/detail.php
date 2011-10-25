@@ -69,7 +69,7 @@ function show_detail_trailer($investigation)
 
 // Connecting, selecting database
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-$tracconn = db_login('wsdata', 'TRAC_USER', 'TRAC_PASSWORD');
+$tracconn = db_login('trac', 'TRAC_USER', 'TRAC_PASSWORD');
 
 if(isset($_GET["freeze"])) {
 	$freeze = $_GET["freeze"];
@@ -111,13 +111,14 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 	$ibb_language = $line["IBB Language"];
 
  // retrieve in target observations
- $query = query_for_detail($investigation, $start_date, $stop_date, $freeze, 'T');
+ $query = query_for_detail($language, $season, $tan, $start, $start_date, $stop_date, $freeze, 'T');
+
  $in_obs = fetch_query($query);
 
  $in_stations = ms_set($in_obs);
 
  // retrieve out of target observations
- $query = query_for_detail($investigation, $start_date, $stop_date, $freeze, 'F');
+ $query = query_for_detail($language, $season, $tan, $start, $start_date, $stop_date, $freeze, 'F');
  $out_obs = fetch_query($query);
 
  $out_stations = ms_set($out_obs);
@@ -136,13 +137,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <TD colspan="5">
 <?php
 	$query = "SET datestyle = 'DMY';";
-	$query .= 'SELECT * FROM sla WHERE';
-	$query .= ' "language"='."'$language'";
-	$query .= ' AND season='."'$season'";
-	$query .= " AND target_area='$tan'";
-	$query .= ' AND start_time='."'$start'";
-	$query .= ' AND valid_from <='."'$stop_date'";
-	$query .= " AND (valid_to IS NULL OR valid_to >= '$start_date')";
+	$query .= query_for_sla($language, $season, $tan, $start, $start_date, $stop_date);
 	//print $query;
     	$sla = show_html_table("Service Level", "sla_tab", $query);
 	$pf = array();
@@ -205,7 +200,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 		$cirafs = "'".$cirafs[0]."'";
 		break;
 	default:
-		$cirafs = "'".implode("'::character varying[]||'", $cirafs)."'::character varying[]";
+		$cirafs = "ANY ('".implode("'::character varying[]||'", $cirafs)."'::character varying[])";
 	}
 	$mapurl = "ta.php?"
 		. "tan=$tan"
@@ -257,7 +252,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <TD width="15%">
 <?php
 	$bquery = 'SELECT DISTINCT stn FROM ms, polygons2d WHERE';
-	$bquery .= " polygons2d.name = ANY ($cirafs)";
+	$bquery .= " polygons2d.name = $cirafs";
 	$bquery .= " AND within(ms.the_geom, polygons2d.the_geom)";
 #print $bquery;
     	$msba = show_html_table("Monitoring Stations In Broadcast Area", "msba_tab", $bquery);
@@ -277,10 +272,12 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <?php
     	$ms_stations = array();
     	foreach($mon_sched as $rec) {
-		$ms_stations[] = $rec['MON LOC'];
+		$ms_stations[$rec['MON LOC']] = 1;
     	}
 	$c = array();
-	foreach($ms_stations as $s) $c[] = array("stn" => $s);
+	foreach(array_keys($ms_stations) as $s){
+		$c[] = array("stn" => $s);
+	}
 	if(count($c)>0)
     	$msba = show_array_in_html_table("Monitoring Locations In Monitoring Schedule", "msms_tab", $c);
 ?>
