@@ -85,6 +85,9 @@ $target=$_GET["target"] or $target = 3;
 if(isset($_GET["score"])) {
 	$score = $_GET["score"];
 }
+if(isset($_GET["date"])) {
+	$date = $_GET["date"];
+}
 
 $query = "SELECT id FROM target_areas WHERE name = '$tan'";
 $result = pg_query($dbconn, $query) or die('Query failed: '. pg_last_error()." for $query");
@@ -131,7 +134,19 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <SCRIPT src="sorttable_colored.js" type="text/javascript"></SCRIPT>
 </HEAD>
 <BODY>
+<TABLE width="100%">
+<TR>
+<TD>
 <H2><?php echo $title; ?></H2>
+</TD>
+<TD align="right">
+<FORM action="monthly.php" method="get">
+<INPUT type="submit" value="Return to Monthly Summary" />
+<INPUT type="hidden" name="date" value="<?php echo $date; ?>" />
+</FORM>
+</TD>
+</TR>
+</TABLE>
 <TABLE border="0" width="100%">
 <TR>
 <TD colspan="5">
