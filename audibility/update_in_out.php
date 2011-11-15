@@ -22,14 +22,6 @@ foreach($_REQUEST as $key => $value)
   {
     $freeze = $value;
   }
-  if($key == 'month')
-  {
-    $month = $value;
-  }
-  if($key == 'season')
-  {
-    $season = $value;
-  }
   if($key == 'score')
   {
     $score = $value;
@@ -46,8 +38,12 @@ foreach($_REQUEST as $key => $value)
   {
     $target = $value;
   }
+  if($key == 'date')
+  {
+    $date = $value;
+  }
 }
-  $url = make_detail_url($season, $month, $language, $ta, $start, $freeze, $score, $target, '');
+  $url = make_detail_url($language, $ta, $start, $freeze, $score, $target, $date);
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
 print "Setting the following monitoring station usage;<br>\n";
 foreach($stns as $stn => $value) {

@@ -1,8 +1,8 @@
 <?php
 
-function make_detail_url($season, $month, $language, $ta, $start, $freeze, $score, $target, $month_date)
+function make_detail_url($language, $ta, $start, $freeze, $score, $target, $month_date)
 {
-        $url = "detail.php?ta=$ta&season=$season&month=$month&language=$language&date=$month_date";
+        $url = "detail.php?ta=$ta&language=$language&date=$month_date";
         $url .= "&start=$start&target=".$target."&score=$score";
         if($freeze!="")
                 $url .="&freeze=$freeze";
@@ -657,7 +657,7 @@ show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_d
 	      $class = "badtwicerow";
 	    else
 	      $class = "badrow";
-	    $url = make_detail_url($season, $month, $lang, $ta, $start, $freeze, $score, $s["target"], $stop_date);
+	    $url = make_detail_url($lang, $ta, $start, $freeze, $score, $s["target"], $stop_date);
 	    $icons += show_row($start, $s, $class, $url);
       }
       show_language_target_area_trailer($icons);

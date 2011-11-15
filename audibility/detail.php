@@ -77,17 +77,20 @@ if(isset($_GET["freeze"])) {
 	$freeze = "";
 }
 $tan=$_GET["ta"] or $tan = 'Europe';
-$season=$_GET["season"] or $season="A11";
-$month=$_GET["month"] or $month = 1;
 $language=$_GET["language"] or $language = 'English';
 $start=$_GET["start"] or $start = '10:00';
 $target=$_GET["target"] or $target = 3;
 if(isset($_GET["score"])) {
 	$score = $_GET["score"];
 }
-if(isset($_GET["date"])) {
+$season="A11";
+$month= 1;
+//if(isset($_GET["date"])) {
 	$date = $_GET["date"];
-}
+	$ymd = explode("-", $date);
+	$season = get_season($ymd[0], $ymd[1]);
+	$month = season_month($season, $ymd[1]);
+//}
 
 $query = "SELECT id FROM target_areas WHERE name = '$tan'";
 $result = pg_query($dbconn, $query) or die('Query failed: '. pg_last_error()." for $query");
