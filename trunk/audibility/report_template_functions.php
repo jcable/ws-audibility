@@ -645,6 +645,8 @@ show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_d
       show_language_target_area_header($region_name, $lang, $ta, $map);
       foreach($scores_for_time as $start => $s)
       {
+	if(array_key_exists("target", $s))
+	{
 	  	$score = in_or_out_score($s["avg"], $s["out_avg"]);
 	  	$pscore = in_or_out_score($s["pavg"], $s["pout_avg"]);
 		if($score == 0)
@@ -659,6 +661,7 @@ show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_d
 	      $class = "badrow";
 	    $url = make_detail_url($lang, $ta, $start, $freeze, $score, $s["target"], $stop_date);
 	    $icons += show_row($start, $s, $class, $url);
+	}
       }
       show_language_target_area_trailer($icons);
       $licons += $icons;
