@@ -9,20 +9,40 @@ function make_detail_url($language, $ta, $start, $freeze, $score, $target, $mont
         return $url;
 }
 
-function db_login($db, $u, $p)
+function readConfig()
 {
   $f = fopen('/etc/default/audibility', 'r');
+  $map = array();
   while(!feof($f)) {
     $line = fgets($f);
     if(strpos($line, '=') == false)
 	continue;
     list($key, $value) = explode("=", $line);
-    if($key == $u) $user = trim($value);
-    if($key == $p) $password = trim($value);
+    $map[$key] = trim($value);
   }
+  return $map;
+}
+
+function db_login($db, $u, $p)
+{
+  $kw = readConfig();
+  $user = $kw[$u];
+  $password = $kw[$p];
   $dbconn = pg_connect("host=localhost dbname=$db user=$user password=$password")
    or die('Could not connect: ' . pg_last_error());
   return $dbconn;
+}
+
+function pdo_login($db, $u, $p)
+{
+  try {
+    $dbh = new PDO('pgsql:host=localhost;dbname=wsdata', 'www', 'www');
+  } catch (PDOException $e) {
+    print "Error!: " . $e->getMessage() . "<br/>";
+    die();
+  }
+  $dbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+  return $dbh;
 }
 
 abstract class Region
