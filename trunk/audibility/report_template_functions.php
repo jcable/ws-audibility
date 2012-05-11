@@ -287,9 +287,14 @@ save_monthly_summary($dbconn, $season, $dates)
     ." AND valid_from <= '$stop_date'"
     ." AND(valid_to IS NULL OR valid_to >= '$start_date')"
     ." GROUP BY target_area, language, start_time";
-  $result = pg_query($dbconn, $sla_query);
+  $result = pg_query($dbconn, $sla_query) or die('Query failed: '.pg_last_error());
   $groups = pg_fetch_all($result);
   pg_free_result($result);
+
+  if($groups == FALSE) {
+    print "No target levels defined for $season<br>\n";
+    return;
+  }
 
   $query = "DELETE FROM saved_monthly_summaries WHERE month = '$start_date'";
   $result = pg_query($dbconn, $query) or die('Query failed: '.pg_last_error());
@@ -661,7 +666,7 @@ show_region_summary($scores, $region_name, $season, $month, $start_date, $stop_d
 	      $class = "badrow";
 	    $url = make_detail_url($lang, $ta, $start, $freeze, $score, $s["target"], $stop_date);
 	    $icons += show_row($start, $s, $class, $url);
-	}
+        }
       }
       show_language_target_area_trailer($icons);
       $licons += $icons;
