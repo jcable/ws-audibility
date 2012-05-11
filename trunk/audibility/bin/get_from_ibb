@@ -1,0 +1,62 @@
+#!/bin/sh
+. /etc/default/audibility
+YM=${1:-`date +%Y-%m`}
+Y=${YM:2:2}
+M=${YM:5:2}
+case $M in
+01 | 02 | 03)
+	if [ $Y -gt 10 ]
+	then
+		SEASON=B`expr $Y - 1`
+	else
+		SEASON=B0`expr $Y - 1`
+	fi
+	;;
+04 | 05 | 06 | 07 | 08 | 09 | 10)
+	SEASON=A$Y
+	;;
+11 | 12)
+	SEASON=B$Y
+esac
+PREFIX=daily_BBC$SEASON
+case $# in
+1)
+	FILES=${PREFIX}.`date -d $1 +%y%m%d`
+	;;
+3)
+	for i in `seq $2 $3`
+	do
+		D=$1-$i
+		FILES="$FILES ${PREFIX}."`date -d $D +%y%m%d`
+	done
+	;;
+*)
+	FILES=${PREFIX}.`date +%y%m%d`
+	;;
+esac
+cd /var/www/html/audibility/import
+for i in $FILES
+do
+echo $i
+  logger -p daemon.info fetching IBB monitoring file
+  if wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@voa.his.com/pub/voa/private/merlin/$i"
+  then
+    logger -p daemon.info IBB monitoring file fetched ok
+    psql -d wsdata -c "truncate table raw_observations;"
+    sed -e 1,2d -e "s/BBC,,,/BBC,,/" $i | psql -d wsdata -c "\\copy raw_observations from stdin delimiter ','"
+    psql -d wsdata <<EOF
+DELETE FROM parsed_observations WHERE row_timestamp IN (SELECT TO_DATE("FileTime",'YYMMDDHH24MISS') FROM raw_observations);
+INSERT INTO parsed_observations
+(stn, frequency, language, date, time, month, s, d, o, row_timestamp)
+SELECT DISTINCT
+upper("FH") as fh, "Freq", "Language", "ObDate",
+TO_TIMESTAMP("Time", 'HH24MI')::time without time zone AS t, DATE_PART('month', "ObDate") as d, "S", "D", "O",
+TO_DATE("FileTime",'YYMMDDHH24MISS')
+FROM raw_observations JOIN languages ON "Lang" = "IBB Language"
+WHERE "BC" = 'BBC' AND "Freq" > 3000
+ORDER BY fh, "Freq", "Language", "ObDate", t;
+EOF
+    psql -d wsdata -c "vacuum parsed_observations"
+    mv -f $i ibb
+  fi
+done

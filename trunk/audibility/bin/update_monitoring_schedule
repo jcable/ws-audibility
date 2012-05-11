@@ -1,0 +1,4 @@
+#!/bin/sh
+cd /var/www/html/audibility
+php fetch_monitoring_schedule_from_gmail.php
+php upload_monitoring_schedule.php import/monitoring_schedule.xls
