@@ -90,9 +90,6 @@ $data = array($season);
 return $data;
 }
 
- // allow use with no parameters
-  $filename = $file = "import/eng.csv";
-
   // allow use from the command line
   if(count($argv)==2)
   {
@@ -103,6 +100,40 @@ return $data;
   if(array_key_exists('file', $_FILES)) {
       $file = $_FILES["file"]["tmp_name"];
       $filename = $_FILES["file"]["name"];
+  }
+
+  // allow use with no parameters
+  if(!isset($file))
+  {
+    $map = readConfig();
+    $conn   = imap_open ("{imap.gmail.com:993/imap/ssl}INBOX", $map['GMAIL_USER'], $map['GMAIL_PASSWORD'], 0, 1);
+    $some   = imap_search($conn, 'ALL UNSEEN SUBJECT "Audibility_Targets"', SE_UID);
+    if(is_array($some)) {
+        foreach($some as $uid) {
+            $s = imap_fetchstructure($conn, $uid, FT_UID);
+            foreach($s->parts as $i => $part) {
+                if( $part->ifdisposition && $part->disposition == 'ATTACHMENT' ) {
+                    $filename = 'target.xls';
+                    if($part->ifparameters) {
+                        foreach($part->parameters as $parameter) {
+                            if($parameter->attribute == "NAME")
+                                $file = $parameter->value;
+                        }
+                    }
+                    if( $part->subtype == "VND.MS-EXCEL" || $part->subtype == "OCTET-STREAM") {
+                        $body = imap_fetchbody($conn, $uid, $i+1, FT_UID);
+                        $f = fopen("/var/www/html/audibility/import/$file", "wb");
+                        fwrite($f, base64_decode($body));
+                        fclose($f);
+                    }
+                }
+            }
+        }
+    }
+  }
+  if(!isset($file))
+  {
+	$filename = $file = "/var/www/html/audibility/import/A12_English_HF Audibility_Targets FINAL.xls";
   }
 
   $Reader = PHPExcel_IOFactory::createReaderForFile($file);  
