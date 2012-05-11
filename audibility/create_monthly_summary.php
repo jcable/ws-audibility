@@ -7,10 +7,16 @@ ob_implicit_flush(true);
 // Connecting, selecting database
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
 
-$freeze = gmdate('Y-m-d');
-$year = gmdate('Y');
-$month_name = gmdate('m');
+// allow use with no parameters
+$today = new DateTime('now', new DateTimeZone('UTC'));
+$prev = clone $today;
+$prev->sub(new DateInterval('P1M'));
 
+$freeze = $today->format('Y-m-d');
+$year = $prev->format('Y');
+$month_name = $prev->format('m');
+
+// allow use from the command line
 if(count($argv)==4)
 {
   $year = $argv[1];
@@ -18,18 +24,23 @@ if(count($argv)==4)
   $freeze = $argv[3];
 }
 
-if(isset($_GET["year"])) {
-	$year = $_GET["year"];
+// normal use from a form
+if(array_key_exists('year', $_REQUEST)) {
+	$year = $_REQUEST["year"];
 }
-if(isset($_GET["month"])) {
-	$month_name = $_GET["month"];
+if(array_key_exists('month', $_REQUEST)) {
+	$a = $_REQUEST["month"];
+	if($a != '')
+		$month_name = $a;
 }
-if(isset($_GET["freeze"])) {
-	$freeze = $_GET["freeze"];
+if(array_key_exists('freeze', $_REQUEST)) {
+	$f = $_REQUEST["freeze"];
+	if($f != '')
+		$freeze = $f;
 }
-if(array_key_exists('date', $_GET))
+if(array_key_exists('date', $_REQUEST))
 {
-        $d = explode('-', $_GET['date']);
+        $d = explode('-', $_REQUEST['date']);
         if( $d[0] != '')
         {
                 $year = $d[0];
