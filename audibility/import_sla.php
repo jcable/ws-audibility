@@ -3,6 +3,8 @@
 <BODY>
 <?php
   require_once("report_template_functions.php");
+  require_once('PHPExcel/PHPExcel.php'); // found when you download the PHPExcel  
+
 
 function get_string($val, $def)
 {
@@ -12,12 +14,13 @@ function get_string($val, $def)
 	return $r;
 }
 
-function get_array($inp, $cols)
+function get_array($sheet, $row, $cols)
 {
     $aout = array();
     for($i=0; $i<count($cols); $i++)
     {
-	$aout[] = trim($inp[$cols[$i]]);
+	$col = $cols[$i];
+	$aout[] = trim($sheet->getCellByColumnAndRow($col, $row)->getValue());
     }
     $out = "{".implode(",", $aout)."}";
     $out = ereg_replace(",+}", "}", $out);
@@ -25,126 +28,131 @@ function get_array($inp, $cols)
     return $out;
 }
 
-  $file = $_FILES["file"]["tmp_name"];
-  $filename = $_FILES["file"]["name"];
-  $season = strtoupper(substr($filename, 0, 3));
+function get_header($sheet, $row, $highestColumnIndex)
+{
+	$header = array();
+	$c_pri = array();
+	$c_sec = array();
+	$c_ref = array();
+  for ($col = 0; $col <= $highestColumnIndex; ++$col) {
+	$cell = $sheet->getCellByColumnAndRow($col, $row);
+		$head = $cell->getValue();
+		$head = strtoupper($head);
+		$head = str_replace("-", "_", $head);
+		$head = str_replace(" ", "_", $head);
+		if($head=="TIME_1") $header['start'] = $col;
+		if($head=="TIME_2") $header['stop'] = $col;
+		if($head=="LANG") $header['lang'] = $col;
+		if($head=="REGION") $header['region'] = $col;
+		if($head=="SERVICE") $header['target_area'] = $col;
+		if($head=="SLA") $header['sla'] = $col;
+		if(substr($head,0,7)=="PRIMARY") $c_pri[] = $col;
+		if(substr($head,0,3)=="SEC") $c_sec[] = $col;
+		if($head=="DAYS_IBB_CODE") $header['days'] = $col;
+		if(substr($head,0,12)=="DAY_REF_FREQ") $c_ref[] = $col;
+		if($head=="VALID_FROM") $header['vf'] = $col;
+		if($head=="VALID_TO") $header['vt'] = $col;
+	}
+	$header['pri'] = $c_pri;
+	$header['sec'] = $c_sec;
+	$header['ref'] = $c_ref;
+	return $header;
+}
+
+function hhmm($t)
+{
+	$t1 = sprintf("%04d", $t);
+	$hh = substr($t1,0,-2);
+	$mm = substr($t1,-2);
+	return "$hh:$mm";
+}
+
+	//. "season, language, region, target_area, "
+	//. "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days"
+function get_row($season, $sheet, $row, $header)
+{
+$data = array($season);
+    $lang = trim($sheet->getCellByColumnAndRow($header['lang'], $row)->getValue());
+    if($lang == 'WSE')
+	  $lang = 'English';
+    $data[] = $lang;
+    $data[] = trim($sheet->getCellByColumnAndRow($header['region'], $row)->getValue());
+    $data[] = trim($sheet->getCellByColumnAndRow($header['target_area'], $row)->getValue());
+    $data[] = hhmm($sheet->getCellByColumnAndRow($header['start'], $row)->getValue());
+    $data[] = $sheet->getCellByColumnAndRow($header['sla'], $row)->getValue();
+    $data[] = $sheet->getCellByColumnAndRow($header['vf'], $row)->getValue();
+    $data[] = $sheet->getCellByColumnAndRow($header['vt'], $row)->getValue();
+    $data[] = get_array($sheet, $row, $header['pri']);
+    $data[] = get_array($sheet, $row, $header['sec']);
+    $data[] = get_string($sheet->getCellByColumnAndRow($header['days'], $row)->getValue(), '1234567');
+    //$stop = hhmm($sheet->getCellByColumnAndRow($header['stop'], $row)->getValue());
+    //$ref = get_array($sheet, $row, $header['ref']);
+return $data;
+}
+
+ // allow use with no parameters
+  $filename = $file = "import/eng.csv";
+
+  // allow use from the command line
+  if(count($argv)==2)
+  {
+    $filename = $file = $argv[1];
+  }
+
+  // allow use with a form
+  if(array_key_exists('file', $_FILES)) {
+      $file = $_FILES["file"]["tmp_name"];
+      $filename = $_FILES["file"]["name"];
+  }
+
+  $Reader = PHPExcel_IOFactory::createReaderForFile($file);  
+  $Reader->setReadDataOnly(true); // set this, to not read all excel properties, just data 
+
+  $season = strtoupper(substr(basename($filename), 0, 3));
   $q = get_season_dates($season);
   $lang = "Vernaculars";
   if(strpos($filename, "WSE")>0 || strpos(strtoupper($filename), "ENGLISH")>0)
 	$lang = "English";
   print "<H2>Import records for $season ($q->start_date to $q->stop_date) into Targets for $lang</H2>";
 
-  $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
+   $dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
 
   $dates = season_dates($season);
-  //$default_valid_from = $dates["start"];
-  //$default_valid_to = $dates["end"];
   $default_valid_from = $q->start_date;
   $default_valid_to = $q->stop_date;
-  pg_free_result($result);
   $query = "delete from sla where season='$season'";
   if($lang=="English")
     $query .= " and language='English'";
   else
     $query .= " and language!='English'";
 
-  $result = pg_query($query) or die('Query failed: ' . pg_last_error());
-  print "Deleted ".pg_affected_rows($result)." rows from Targets Table\n";
-  pg_free_result($result);
-  flush(); ob_flush();
-try {
-  $h=fopen($file, "r");
-  if(is_resource($h))
-  {
-    print "<br>opened<br>\n"; flush(); ob_flush();
-  } else {
-    print "<br>can't open $file<br>\n"; flush(); ob_flush();
-  }
-} catch (Exception $e) {
-  print 'Caught exception: '.$e->getMessage()."<BR>\n";
-}
-try {
-	$line = fgetcsv($h);
-	$c_pri = array();
-	$c_sec = array();
-	$c_ref = array();
-	for($i=0; $i<count($line); $i++)
-	{
-		$head = strtoupper($line[$i]);
-		$head = str_replace("-", "_", $head);
-		$head = str_replace(" ", "_", $head);
-		if($head=="TIME_1") $c_start = $i;
-		if($head=="TIME_2") $c_stop = $i;
-		if($head=="LANG") $c_lang = $i;
-		if($head=="REGION") $c_region = $i;
-		if($head=="SERVICE") $c_target_area = $i;
-		if($head=="SLA") $c_sla = $i;
-		if(substr($head,0,7)=="PRIMARY") $c_pri[] = $i;
-		if(substr($head,0,3)=="SEC") $c_sec[] = $i;
-		if($head=="DAYS_IBB_CODE") $c_days = $i;
-		if(substr($head,0,12)=="DAY_REF_FREQ") $c_ref[] = $i;
-		if($head=="VALID_FROM") $c_vf = $i;
-		if($head=="VALID_TO") $c_vt = $i;
-	}
-} catch (Exception $e) {
-  print 'Caught exception: '.$e->getMessage()."<BR>\n";
-}
-  flush(); ob_flush();
-  $count = 0;
-  while(!feof($h))
-  {
-  	$line = fgetcsv($h);
-	if(!is_array($line))
-		continue;
-	$hh = substr($line[$c_start],0,-2);
-	switch(strlen($hh))
-	{
-	case 0:
-		$hh = "00";
-		break;
-	case 1:
-		$hh = "0$hh";
-		break;
-	}
-	$mm = substr($line[$c_start],-2);
-	switch(strlen($mm))
-	{
-	case 0:
-		$mm = "00";
-		break;
-	case 1:
-		$mm = "0$mm";
-		break;
-	}
-    $start = "$hh:$mm";
-    $stop = substr($line[$c_stop],0,-2).":".substr($line[$c_stop],-2);
-    $lang = trim($line[$c_lang]);
-	if($lang == '')
-		continue;
-	if($lang == 'WSE')
-	  $lang = 'English';
-    $region = trim($line[$c_region]);
-    $target_area = trim($line[$c_target_area]);
-    $sla = $line[$c_sla];
-    $pri = get_array($line, $c_pri);
-    $sec = get_array($line, $c_sec);
-    $ref = get_array($line, $c_ref);
-    $day = get_string($line[$c_days], '1234567');
-    $valid_from = get_string($line[$c_vf], $default_valid_from);
-    $valid_to = get_string($line[$c_vt], $default_valid_to);
-    $query = "INSERT INTO sla (";
-	$query .= "season, language, region, target_area, ";
-	$query .= "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days";
-	$query .= ") VALUES (";
-	$query .= "'$season', '$lang', '$region', '$target_area',";
-	$query .= "'$start', $sla, '$valid_from', '$valid_to', '$pri', '$sec', '$day'";
-	$query .= ")";
-	flush(); ob_flush();
-    $result = pg_query($query) or die('Query failed: ' . pg_last_error()."<PRE>\n".$query."</PRE>");
-    pg_free_result($result);
+  $result = $dbh->exec($query);
+  print "Deleted ".$result." rows from Targets Table\n";
+
+  $objXLS = $Reader->load($file);
+$objWorksheet = $objXLS->getActiveSheet();
+$highestRow = $objWorksheet->getHighestRow(); // e.g. 10
+$highestColumn = $objWorksheet->getHighestColumn(); // e.g 'F'
+$highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn); // e.g. 5
+
+$count=0;
+$header = get_header($objWorksheet, 1, $highestColumnIndex);
+    $query = "INSERT INTO sla ("
+	. "season, language, region, target_area, "
+	. "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days"
+	. ") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+$stmt = $dbh->prepare($query);
+for ($row = 2; $row <= $highestRow; ++$row) {
+$data = get_row($season, $objWorksheet, $row, $header);
+
+
+    $result = $stmt->execute($data);
 	$count++;
   }
-  fclose($h);
+ $objXLS->disconnectWorksheets();  
+
+unset($objXLS); 
+
 ?>
 Added appox. <?php print $count; ?> rows into the SLA table.
 </BODY>
