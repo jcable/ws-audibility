@@ -255,6 +255,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 ?>
 </TABLE>
 <?php
+	print "<input type='hidden' name='date' value='$date'/>";
 	print "<input type='hidden' name='ta' value='$tan'/>";
 	print "<input type='hidden' name='freeze' value='$freeze'/>";
 	print "<input type='hidden' name='score' value='$score'/>";
