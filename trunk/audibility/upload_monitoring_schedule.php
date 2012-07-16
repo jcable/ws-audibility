@@ -65,9 +65,10 @@ if(count($argv)==2)
 // allow use with a form
 if(array_key_exists('file', $_FILES))
 {
+#print_r($_FILES);
     $file = $_FILES["file"]["tmp_name"];
     $filename = $_FILES["file"]["name"];
-    `mv $file import/$filename`;
+    `mv '$file' 'import/$filename'`;
     $file = "import/$filename";
 }
 
