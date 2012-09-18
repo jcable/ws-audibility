@@ -35,8 +35,11 @@ function db_login($db, $u, $p)
 
 function pdo_login($db, $u, $p)
 {
+  $kw = readConfig();
+  $user = $kw[$u];
+  $password = $kw[$p];
   try {
-    $dbh = new PDO('pgsql:host=localhost;dbname=wsdata', 'www', 'www');
+    $dbh = new PDO("pgsql:host=localhost;dbname=$db", $user, $password);
   } catch (PDOException $e) {
     print "Error!: " . $e->getMessage() . "<br/>";
     die();

@@ -69,7 +69,6 @@ function show_detail_trailer($investigation)
 
 // Connecting, selecting database
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-$tracconn = db_login('trac', 'TRAC_USER', 'TRAC_PASSWORD');
 
 if(isset($_GET["freeze"])) {
 	$freeze = $_GET["freeze"];
@@ -198,7 +197,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 	$query .= ' , polygons2d p, target_areas t';
 	$query .= ' WHERE';
 	$query .= ' "Language"='."'$language'";
-	$query .= " AND t.name='$tan' AND intersects(p.the_geom, t.the_geom) AND p.name = ANY(h.cirafs)";
+	$query .= " AND t.name='$tan' AND ST_Intersects(p.the_geom, t.the_geom) AND p.name = ANY(h.cirafs)";
 	$query .= ' AND start <='."('$start' + '00:00:30'::interval)";
 	$query .= ' AND stop >='."('$start' + '00:29:30'::interval)";
 	$query .= ' AND valid_from <='."'$stop_date'";
@@ -272,7 +271,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <?php
 	$bquery = 'SELECT DISTINCT stn FROM ms, polygons2d WHERE';
 	$bquery .= " polygons2d.name = $cirafs";
-	$bquery .= " AND within(ms.the_geom, polygons2d.the_geom)";
+	$bquery .= " AND ST_Within(ms.the_geom, polygons2d.the_geom)";
 #print $bquery;
     	$msba = show_html_table("Monitoring Stations In Broadcast Area", "msba_tab", $bquery);
 ?>
@@ -281,7 +280,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <?php
 	$tquery = 'SELECT DISTINCT stn FROM ms, target_areas WHERE';
 	$tquery .= " target_areas.name='$tan'";
-	$tquery .= " AND within(ms.the_geom, target_areas.the_geom)";
+	$tquery .= " AND ST_Within(ms.the_geom, target_areas.the_geom)";
     	$msta = show_html_table("Monitoring Stations In Target Area", "msta_tab", $tquery);
 	$ta_in_stations = array();
 	foreach($msta as $s) $ta_in_stations[] = $s[0];
@@ -337,18 +336,18 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 <TD valign="top" width="50%">
 <div class='tabtitle'>Existing Investigations Records</div>
 <IFRAME width="100%" height="300px" src="<?php
-	print "/cgi-bin/trac.cgi/query?language=$language&target_area=$tan";
+	print "/trac/query?language=$language&target_area=$tan";
 ?>">
 </IFRAME>
 <?php
 	$ticket = -1;
-	$result = pg_query($tracconn,
+	$result = pg_query($dbconn,
 "SELECT ticket FROM ticket_custom WHERE name='report_id' AND value='$month$season'"
 	) or die('Query failed: ' . pg_last_error()." for $query");
 	for($i=0; $i<pg_num_rows($result); $i++) {
 		$line = pg_fetch_array($result, null, PGSQL_ASSOC);
 		$t = $line['ticket'];
-		$r2 = pg_query($tracconn, "SELECT name,value from ticket_custom WHERE ticket=$t");
+		$r2 = pg_query($dbconn, "SELECT name,value from ticket_custom WHERE ticket=$t");
 		$ok = true;
 		for($j=0; $j<pg_num_rows($r2); $j++) {
 			$line = pg_fetch_array($r2, null, PGSQL_ASSOC);
@@ -367,7 +366,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 	{
 		print "<div class='tabtitle'>Investigation Record</div>\n";
 		print '<IFRAME width="100%" height="800px" src="';
-		print "/cgi-bin/trac.cgi/ticket/$ticket";
+		print "/trac/ticket/$ticket";
 		print '">\n';
 	}
 	else
@@ -375,7 +374,7 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 ?>
 <div class='tabtitle'>Create New Investigation Record</div>
 <IFRAME width="100%" height="800px" src="<?php
-	print "/cgi-bin/trac.cgi/newticket";
+	print "/trac/newticket";
 	print "?language=$language";
 	print "&target_area=$tan";
 	print "&timeslot=$start";
@@ -399,7 +398,6 @@ $title="Detail for $language in $tan ($ta) at $start during $month_name";
 </TABLE>
 <?php
 	pg_close($dbconn);
-	pg_close($tracconn);
 ?>
 </BODY>
 </HTML>

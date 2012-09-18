@@ -1,0 +1,4 @@
+# Run import scripts
+0 1 * * * root /var/www/html/audibility/bin/get_from_ibb
+0 1 * * * root /var/www/html/audibility/bin/update_monitoring_schedule
+0 1 * * * root /var/www/html/audibility/bin/get_hf_schedule

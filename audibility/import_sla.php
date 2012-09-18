@@ -3,8 +3,38 @@
 <BODY>
 <?php
   require_once("report_template_functions.php");
+  set_include_path(get_include_path() . PATH_SEPARATOR . '../phpMyAdmin/libraries');
   require_once('PHPExcel/PHPExcel.php'); // found when you download the PHPExcel  
+  date_default_timezone_set("UTC");
 
+function get_from_email($box, $user, $password)
+{
+	$conn   = imap_open ($box, $user, $password, 0, 1);
+	$some   = imap_search($conn, 'ALL UNSEEN SUBJECT "Audibility_Targets"', SE_UID);
+    if(is_array($some)) {
+        foreach($some as $uid) {
+            $s = imap_fetchstructure($conn, $uid, FT_UID);
+            foreach($s->parts as $i => $part) {
+                if( $part->ifdisposition && $part->disposition == 'ATTACHMENT' ) {
+                    if($part->ifparameters) {
+                        foreach($part->parameters as $parameter) {
+                            if($parameter->attribute == "NAME")
+                                $file = $parameter->value;
+                        }
+                    }
+                    if( $part->subtype == "VND.MS-EXCEL" || $part->subtype == "OCTET-STREAM") {
+                        $body = imap_fetchbody($conn, $uid, $i+1, FT_UID);
+                        $f = fopen($savepath+"/"+$file, "wb");
+                        fwrite($f, base64_decode($body));
+                        fclose($f);
+						return $file;
+                    }
+                }
+            }
+        }
+    }
+	return "";
+}
 
 function get_string($val, $def)
 {
@@ -19,13 +49,12 @@ function get_array($sheet, $row, $cols)
     $aout = array();
     for($i=0; $i<count($cols); $i++)
     {
-	$col = $cols[$i];
-	$aout[] = trim($sheet->getCellByColumnAndRow($col, $row)->getValue());
+		$col = $cols[$i];
+		$freq = trim($sheet->getCellByColumnAndRow($col, $row)->getValue());
+		if($freq != "")
+			$aout[] = $freq;
     }
-    $out = "{".implode(",", $aout)."}";
-    $out = ereg_replace(",+}", "}", $out);
-    $out = ereg_replace(",+", ",", $out);
-    return $out;
+    return "{".implode(",", $aout)."}";
 }
 
 function get_header($sheet, $row, $highestColumnIndex)
@@ -67,31 +96,36 @@ function hhmm($t)
 	return "$hh:$mm";
 }
 
+function hhmmss($t)
+{
+	return hhmm($t).":00";
+}
+
 	//. "season, language, region, target_area, "
 	//. "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days"
 function get_row($season, $sheet, $row, $header)
 {
-$data = array($season);
+	$data = array($season);
     $lang = trim($sheet->getCellByColumnAndRow($header['lang'], $row)->getValue());
     if($lang == 'WSE')
 	  $lang = 'English';
     $data[] = $lang;
     $data[] = trim($sheet->getCellByColumnAndRow($header['region'], $row)->getValue());
     $data[] = trim($sheet->getCellByColumnAndRow($header['target_area'], $row)->getValue());
-    $data[] = hhmm($sheet->getCellByColumnAndRow($header['start'], $row)->getValue());
+    $data[] = hhmmss($sheet->getCellByColumnAndRow($header['start'], $row)->getValue());
     $data[] = $sheet->getCellByColumnAndRow($header['sla'], $row)->getValue();
-    $data[] = $sheet->getCellByColumnAndRow($header['vf'], $row)->getValue();
-    $data[] = $sheet->getCellByColumnAndRow($header['vt'], $row)->getValue();
+    $data[] = PHPExcel_Style_NumberFormat::toFormattedString($sheet->getCellByColumnAndRow($header['vf'], $row)->getValue(), "YYYY-MM-DD");
+    $data[] = PHPExcel_Style_NumberFormat::toFormattedString($sheet->getCellByColumnAndRow($header['vt'], $row)->getValue(), "YYYY-MM-DD");
     $data[] = get_array($sheet, $row, $header['pri']);
     $data[] = get_array($sheet, $row, $header['sec']);
     $data[] = get_string($sheet->getCellByColumnAndRow($header['days'], $row)->getValue(), '1234567');
     //$stop = hhmm($sheet->getCellByColumnAndRow($header['stop'], $row)->getValue());
     //$ref = get_array($sheet, $row, $header['ref']);
-return $data;
+	return $data;
 }
 
   // allow use from the command line
-  if(count($argv)==2)
+  if(isset($argv) && count($argv)==2)
   {
     $filename = $file = $argv[1];
   }
@@ -105,60 +139,37 @@ return $data;
   // allow use with no parameters
   if(!isset($file))
   {
-    $map = readConfig();
-    $conn   = imap_open ("{imap.gmail.com:993/imap/ssl}INBOX", $map['GMAIL_USER'], $map['GMAIL_PASSWORD'], 0, 1);
-    $some   = imap_search($conn, 'ALL UNSEEN SUBJECT "Audibility_Targets"', SE_UID);
-    if(is_array($some)) {
-        foreach($some as $uid) {
-            $s = imap_fetchstructure($conn, $uid, FT_UID);
-            foreach($s->parts as $i => $part) {
-                if( $part->ifdisposition && $part->disposition == 'ATTACHMENT' ) {
-                    $filename = 'target.xls';
-                    if($part->ifparameters) {
-                        foreach($part->parameters as $parameter) {
-                            if($parameter->attribute == "NAME")
-                                $file = $parameter->value;
-                        }
-                    }
-                    if( $part->subtype == "VND.MS-EXCEL" || $part->subtype == "OCTET-STREAM") {
-                        $body = imap_fetchbody($conn, $uid, $i+1, FT_UID);
-                        $f = fopen("/var/www/html/audibility/import/$file", "wb");
-                        fwrite($f, base64_decode($body));
-                        fclose($f);
-                    }
-                }
-            }
-        }
-    }
-  }
-  if(!isset($file))
-  {
-	$filename = $file = "/var/www/html/audibility/import/A12_English_HF Audibility_Targets FINAL.xls";
-  }
+	if(function_exists("readConfig")) {
+		$map = readConfig();
+	} else {
+		$map = array();
+	}
+	$file = $filename = get_from_email("{imap.gmail.com:993/imap/ssl}INBOX", $map['GMAIL_USER'], $map['GMAIL_PASSWORD'], "/var/www/html/audibility/import/");
+	if($file=="")
+		$file = $filename = "/var/www/html/audibility/import/A12_English_HF Audibility_Targets July.xls";
 
+  }
   $Reader = PHPExcel_IOFactory::createReaderForFile($file);  
   $Reader->setReadDataOnly(true); // set this, to not read all excel properties, just data 
 
   $season = strtoupper(substr(basename($filename), 0, 3));
-  $q = get_season_dates($season);
+  if(function_exists("get_season_dates")) {
+	$q = get_season_dates($season);
+	$dates = season_dates($season);
+  } else {
+	$q->start_date="";
+	$q->stop_date="";
+	$dates = array();
+  }
+
   $lang = "Vernaculars";
   if(strpos($filename, "WSE")>0 || strpos(strtoupper($filename), "ENGLISH")>0)
 	$lang = "English";
   print "<H2>Import records for $season ($q->start_date to $q->stop_date) into Targets for $lang</H2>";
 
-   $dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
 
-  $dates = season_dates($season);
   $default_valid_from = $q->start_date;
   $default_valid_to = $q->stop_date;
-  $query = "delete from sla where season='$season'";
-  if($lang=="English")
-    $query .= " and language='English'";
-  else
-    $query .= " and language!='English'";
-
-  $result = $dbh->exec($query);
-  print "Deleted ".$result." rows from Targets Table\n";
 
   $objXLS = $Reader->load($file);
 $objWorksheet = $objXLS->getActiveSheet();
@@ -168,14 +179,21 @@ $highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn); // e
 
 $count=0;
 $header = get_header($objWorksheet, 1, $highestColumnIndex);
-    $query = "INSERT INTO sla ("
+  $delete_query = "delete from sla where season='$season'";
+  if($lang=="English")
+    $delete_query .= " and language='English'";
+  else
+    $delete_query .= " and language!='English'";
+  $insert_query = "INSERT INTO sla ("
 	. "season, language, region, target_area, "
 	. "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days"
 	. ") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
-$stmt = $dbh->prepare($query);
+$dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
+$result = $dbh->exec($delete_query);
+print "Deleted ".$result." rows from Targets Table<br/>\n";	
+$stmt = $dbh->prepare($insert_query);
 for ($row = 2; $row <= $highestRow; ++$row) {
 $data = get_row($season, $objWorksheet, $row, $header);
-
 
     $result = $stmt->execute($data);
 	$count++;
