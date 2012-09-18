@@ -65,7 +65,6 @@ if(count($argv)==2)
 // allow use with a form
 if(array_key_exists('file', $_FILES))
 {
-#print_r($_FILES);
     $file = $_FILES["file"]["tmp_name"];
     $filename = $_FILES["file"]["name"];
     `mv '$file' 'import/$filename'`;
@@ -103,6 +102,10 @@ if(!isset($file))
 }
 
 
+if(isset($file))
+{
+print "reading $file<br/>\n";
+
 $Reader = PHPExcel_IOFactory::createReaderForFile($file);
 
 $dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
@@ -137,6 +140,10 @@ $objXLS->disconnectWorksheets();
 unset($objXLS);
 
 print "Inserted $count rows into monitoring schedule\n";
+
+} else {
+print "no monitoring schedule spreadsheet specified\n";
+}
 ?>
 <FORM><INPUT TYPE="button" VALUE="Back" onClick="history.go(-1);return true;"></FORM>
 </BODY>
