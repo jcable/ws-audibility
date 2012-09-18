@@ -1,4 +1,8 @@
 #!/bin/sh
+# usage:
+# no arguments = get todays file
+# 1 argument = get a specific dates file
+# 3 arguments = yyyy-mm dd1 dd2 = get from first day to second day in a month
 . /etc/default/audibility
 YM=${1:-`date +%Y-%m`}
 Y=${YM:2:2}
@@ -34,7 +38,8 @@ case $# in
 	FILES=${PREFIX}.`date +%y%m%d`
 	;;
 esac
-cd /var/www/html/audibility/import
+mkdir -p ${IMPORT_PATH}/ibb
+cd ${IMPORT_PATH}/ibb
 for i in $FILES
 do
 echo $i
@@ -42,21 +47,6 @@ echo $i
   if wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@voa.his.com/pub/voa/private/merlin/$i"
   then
     logger -p daemon.info IBB monitoring file fetched ok
-    psql -d wsdata -c "truncate table raw_observations;"
-    sed -e 1,2d -e "s/BBC,,,/BBC,,/" $i | psql -d wsdata -c "\\copy raw_observations from stdin delimiter ','"
-    psql -d wsdata <<EOF
-DELETE FROM parsed_observations WHERE row_timestamp IN (SELECT TO_DATE("FileTime",'YYMMDDHH24MISS') FROM raw_observations);
-INSERT INTO parsed_observations
-(stn, frequency, language, date, time, month, s, d, o, row_timestamp)
-SELECT DISTINCT
-upper("FH") as fh, "Freq", "Language", "ObDate",
-TO_TIMESTAMP("Time", 'HH24MI')::time without time zone AS t, DATE_PART('month', "ObDate") as d, "S", "D", "O",
-TO_DATE("FileTime",'YYMMDDHH24MISS')
-FROM raw_observations JOIN languages ON "Lang" = "IBB Language"
-WHERE "BC" = 'BBC' AND "Freq" > 3000
-ORDER BY fh, "Freq", "Language", "ObDate", t;
-EOF
-    psql -d wsdata -c "vacuum parsed_observations"
-    mv -f $i ibb
+    php /var/www/html/audibility/import_audibility_data.php $i
   fi
 done

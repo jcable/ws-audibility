@@ -115,7 +115,7 @@ function get_quadrants_from_db($zonestring, $fmt)
 function add_geometry_from_ciraf_quadrants($target_table, $footprint)
 {
 	foreach($footprint as $quadrants) {
-		$query = "UPDATE \"$target_table\" SET the_geom FROM SELECT multi(geomunion(the_geom))";
+		$query = "UPDATE \"$target_table\" SET the_geom FROM SELECT multi(ST_Union(the_geom))";
 		//$query .= " FROM ciraf_zones WHERE ciraf_id||quadrant IN('".implode($quadrants,"','")."')";
 		$query .= " FROM ciraf_zones WHERE ciraf_id||quadrant IN(quadrants)";
 		print "$query\n";

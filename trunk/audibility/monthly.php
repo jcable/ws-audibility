@@ -91,7 +91,6 @@ function show_row($start, $s, $class, $url)
 
 // Connecting, selecting database
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-$tracconn = db_login('trac', 'TRAC_USER', 'TRAC_PASSWORD');
 
 $freeze = gmdate('Y-m-d');
 $year = gmdate('Y');
@@ -134,7 +133,7 @@ $title = "Audibility Report for $month_name ($season)";
 <?php
 	print "<H1>$title</H1>";
 
-	$investigations = get_investigations($tracconn, $month, $season, $map);
+	$investigations = get_investigations($dbconn, $month, $season, $map);
 
 	$dates->start = $start_date;
 	$dates->stop = $stop_date;

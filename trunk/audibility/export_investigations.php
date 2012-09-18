@@ -138,7 +138,6 @@ class SummarySheet extends Region
 
 // Connecting, selecting databases
 $dbconn = db_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-$tracconn = db_login('trac', 'TRAC_USER', 'TRAC_PASSWORD');
 
 $freeze = gmdate('Y-m-d');
 $year = gmdate('Y');
@@ -203,7 +202,7 @@ echo start_workbook("BBC World Service", "BBC");
 	<Style ss:ID="s_sum"><NumberFormat ss:Format="0.0"/></Style>
  </Styles>
 <?php
-	$investigations = get_investigations($tracconn, $month, $season, $map);
+	$investigations = get_investigations($dbconn, $month, $season, $map);
 
 //Start of text for Investigations sheet
 	echo start_sheet("Investigations");
