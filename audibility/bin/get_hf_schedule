@@ -1,7 +1,8 @@
 #!/bin/sh
 . /etc/default/audibility
-export FILE=`curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip --list "$HF_URL" | tail -1`
-curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip -o $FILE "$HF_URL/$FILE"
-echo $FILE
-php /var/www/html/audibility/upload_hf_schedule.php $FILE
-rm $FILE
+FILE=`curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip --list "$HF_URL" | tail -1`
+if curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip -o $FILE "$HF_URL/$FILE"
+then
+  logger -p daemon.info HF schedule file fetched ok
+  php /var/www/html/audibility/upload_hf_schedule.php $FILE
+fi
