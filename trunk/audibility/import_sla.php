@@ -2,14 +2,50 @@
 <HEAD><TITLE>WS HF Audibility Verification</TITLE></HEAD>
 <BODY>
 <?php
-  require_once("report_template_functions.php");
-  set_include_path(get_include_path() . PATH_SEPARATOR . '../phpMyAdmin/libraries');
-  require_once('PHPExcel/PHPExcel.php'); // found when you download the PHPExcel  
-  date_default_timezone_set("UTC");
+
+function delete_existing($dbh, $lang, $season) {
+  $delete_query = "delete from sla where season=? and (language='English')=?";
+  if($lang=="English")
+	$english = 'true';
+  else
+	$english = 'false';
+  $stmt = $dbh->prepare($delete_query);
+  $result = $stmt->execute(array($season, $english));
+  return $stmt->rowCount();
+}
+
+function importfile($dbh, $file, $season) {
+  $Reader = PHPExcel_IOFactory::createReaderForFile($file);  
+  $Reader->setReadDataOnly(true); // set this, to not read all excel properties, just data 
+  $objXLS = $Reader->load($file);
+  $objWorksheet = $objXLS->getActiveSheet();
+  $highestRow = $objWorksheet->getHighestRow(); // e.g. 10
+  $highestColumn = $objWorksheet->getHighestColumn(); // e.g 'F'
+  $highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn); // e.g. 5
+
+  $header = get_header($objWorksheet, 1, $highestColumnIndex);
+  $insert_query = "INSERT INTO sla ("
+	. "season, language, region, target_area, "
+	. "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days"
+	. ") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+  $stmt = $dbh->prepare($insert_query);
+
+  $count=0;
+  for ($row = 2; $row <= $highestRow; ++$row) {
+    $data = get_row($season, $objWorksheet, $row, $header);
+    $result = $stmt->execute($data);
+    $count += $stmt->rowCount();
+  }
+  $objXLS->disconnectWorksheets();  
+  unset($objXLS); 
+  return $count;
+}
 
 function get_from_email($box, $user, $password)
 {
 	$conn   = imap_open ($box, $user, $password, 0, 1);
+	if($conn == false)
+		return null;
 	$some   = imap_search($conn, 'ALL UNSEEN SUBJECT "Audibility_Targets"', SE_UID);
     if(is_array($some)) {
         foreach($some as $uid) {
@@ -124,6 +160,12 @@ function get_row($season, $sheet, $row, $header)
 	return $data;
 }
 
+  require_once("report_template_functions.php");
+  set_include_path(get_include_path() . PATH_SEPARATOR . '../phpMyAdmin/libraries');
+  require_once('PHPExcel/PHPExcel.php'); // found when you download the PHPExcel  
+  date_default_timezone_set("UTC");
+  $dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
+
   // allow use from the command line
   if(isset($argv) && count($argv)==2)
   {
@@ -145,64 +187,39 @@ function get_row($season, $sheet, $row, $header)
 		$map = array();
 	}
 	$file = $filename = get_from_email("{imap.gmail.com:993/imap/ssl}INBOX", $map['GMAIL_USER'], $map['GMAIL_PASSWORD'], "/var/www/html/audibility/import/");
-	if($file=="")
-		$file = $filename = "/var/www/html/audibility/import/A12_English_HF Audibility_Targets July.xls";
 
   }
-  $Reader = PHPExcel_IOFactory::createReaderForFile($file);  
-  $Reader->setReadDataOnly(true); // set this, to not read all excel properties, just data 
 
-  $season = strtoupper(substr(basename($filename), 0, 3));
-  if(function_exists("get_season_dates")) {
-	$q = get_season_dates($season);
-	$dates = season_dates($season);
-  } else {
-	$q->start_date="";
-	$q->stop_date="";
-	$dates = array();
-  }
+  if(file_exists($file)) {
 
-  $lang = "Vernaculars";
-  if(strpos($filename, "WSE")>0 || strpos(strtoupper($filename), "ENGLISH")>0)
+   $season = strtoupper(substr(basename($filename), 0, 3));
+   if(function_exists("get_season_dates")) {
+      $q = get_season_dates($season);
+      $dates = season_dates($season);
+   } else {
+      $q->start_date="";
+      $q->stop_date="";
+      $dates = array();
+   }
+
+   $lang = "Vernaculars";
+   if(strpos($filename, "WSE")>0 || strpos(strtoupper($filename), "ENGLISH")>0)
 	$lang = "English";
-  print "<H2>Import records for $season ($q->start_date to $q->stop_date) into Targets for $lang</H2>";
+   print "<H2>Import records for $season ($q->start_date to $q->stop_date) into Targets for $lang</H2>";
 
+   $default_valid_from = $q->start_date;
+   $default_valid_to = $q->stop_date;
+   $deleted = delete_existing($dbh, $lang, $season);
+   $count = importfile($dbh, $file, $season);
 
-  $default_valid_from = $q->start_date;
-  $default_valid_to = $q->stop_date;
-
-  $objXLS = $Reader->load($file);
-$objWorksheet = $objXLS->getActiveSheet();
-$highestRow = $objWorksheet->getHighestRow(); // e.g. 10
-$highestColumn = $objWorksheet->getHighestColumn(); // e.g 'F'
-$highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn); // e.g. 5
-
-$count=0;
-$header = get_header($objWorksheet, 1, $highestColumnIndex);
-  $delete_query = "delete from sla where season='$season'";
-  if($lang=="English")
-    $delete_query .= " and language='English'";
-  else
-    $delete_query .= " and language!='English'";
-  $insert_query = "INSERT INTO sla ("
-	. "season, language, region, target_area, "
-	. "start_time, target, valid_from, valid_to, primary_frequency, secondary_frequency, ibb_days"
-	. ") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
-$dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-$result = $dbh->exec($delete_query);
-print "Deleted ".$result." rows from Targets Table<br/>\n";	
-$stmt = $dbh->prepare($insert_query);
-for ($row = 2; $row <= $highestRow; ++$row) {
-$data = get_row($season, $objWorksheet, $row, $header);
-
-    $result = $stmt->execute($data);
-	$count++;
-  }
- $objXLS->disconnectWorksheets();  
-
-unset($objXLS); 
+   print "Deleted $deleted rows from Targets table<br/>";
+   print "Added $count rows into the Targets table.";
+}
+else {
+   print "no file provided.";
+}
 
 ?>
-Added appox. <?php print $count; ?> rows into the SLA table.
+<FORM><INPUT TYPE="button" VALUE="Back" onClick="history.go(-1);return true;"></FORM>
 </BODY>
 </HTML>

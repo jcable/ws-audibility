@@ -8,6 +8,38 @@
 require_once('ciraf_lib.php');
 require_once("report_template_functions.php");
 require_once('PHPExcel/PHPExcel.php'); // found when you download the PHPExcel
+date_default_timezone_set("UTC");
+$dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
+
+function import_file($dbh, $file) {
+	$Reader = PHPExcel_IOFactory::createReaderForFile($file);
+	$objXLS = $Reader->load($file);
+	$objWorksheet = $objXLS->getActiveSheet();
+	$highestRow = $objWorksheet->getHighestRow(); // e.g. 10
+	$highestColumn = $objWorksheet->getHighestColumn(); // e.g 'F'
+	$highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn); // e.g. 5
+	$dbh->exec("TRUNCATE TABLE monitoring_schedule");
+	$query = 'INSERT INTO monitoring_schedule ('
+		.'"ID", "TAB", "LANG", "START", "STOP", "FREQ", "SITE", "IBB DAY CODE", '
+		.'"MON LOC", "ADD DATE", "PERMANENT DELETION DATE", "TARGET AREA", "COMMENT") '
+		.'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)';
+	$stmt = $dbh->prepare($query);
+
+	$header = get_header($objWorksheet, 1, $highestColumnIndex);
+	$count=0;
+	for ($row = 2; $row <= $highestRow; ++$row) {
+	    $data = get_row($objWorksheet, $row, $header);
+	    if($data[2] != '') {
+		$result = $stmt->execute($data);
+		$count += $stmt->rowCount();
+	    }
+	}
+
+	$objXLS->disconnectWorksheets();
+	unset($objXLS);
+
+	return $count;
+}
 
 
 	//.'"ID", "TAB", "LANG", "START", "STOP", "FREQ", "SITE", "IBB DAY CODE", '
@@ -104,45 +136,11 @@ if(!isset($file))
 
 if(isset($file))
 {
-print "reading $file<br/>\n";
-
-$Reader = PHPExcel_IOFactory::createReaderForFile($file);
-
-$dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
-
-date_default_timezone_set("UTC");
-
-$objXLS = $Reader->load($file);
-$objWorksheet = $objXLS->getActiveSheet();
-$highestRow = $objWorksheet->getHighestRow(); // e.g. 10
-$highestColumn = $objWorksheet->getHighestColumn(); // e.g 'F'
-$highestColumnIndex = PHPExcel_Cell::columnIndexFromString($highestColumn); // e.g. 5
-
-$dbh->exec("TRUNCATE TABLE monitoring_schedule");
-
-$count=0;
-$query = 'INSERT INTO monitoring_schedule ('
-	.'"ID", "TAB", "LANG", "START", "STOP", "FREQ", "SITE", "IBB DAY CODE", '
-	.'"MON LOC", "ADD DATE", "PERMANENT DELETION DATE", "TARGET AREA", "COMMENT") '
-        .'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)';
-$stmt = $dbh->prepare($query);
-
-$header = get_header($objWorksheet, 1, $highestColumnIndex);
-for ($row = 2; $row <= $highestRow; ++$row) {
-    $data = get_row($objWorksheet, $row, $header);
-    if($data[2] != '') {
-        $result = $stmt->execute($data);
-        $count++;
-    }
-}
-
-$objXLS->disconnectWorksheets();
-unset($objXLS);
-
-print "Inserted $count rows into monitoring schedule\n";
-
+  print "reading $file<br/>\n";
+  $count = import_file($dbh, $file);
+  print "Inserted $count rows into monitoring schedule\n";
 } else {
-print "no monitoring schedule spreadsheet specified\n";
+  print "no monitoring schedule spreadsheet specified\n";
 }
 ?>
 <FORM><INPUT TYPE="button" VALUE="Back" onClick="history.go(-1);return true;"></FORM>

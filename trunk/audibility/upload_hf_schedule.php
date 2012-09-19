@@ -1,6 +1,7 @@
 <HTML>
 <HEAD><TITLE>WS HF Audibility Verification</TITLE></HEAD>
 <BODY>
+<H2>Import Broadcast Schedule</H2>
 <?php
 
   require_once('ciraf_lib.php');
@@ -57,5 +58,6 @@ try {
 }
   $dbh = null;
 ?>
+<BR/><FORM><INPUT TYPE="button" VALUE="Back" onClick="history.go(-1);return true;"></FORM>
 </BODY>
 </HTML>
