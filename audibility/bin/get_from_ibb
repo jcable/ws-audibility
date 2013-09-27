@@ -42,11 +42,18 @@ mkdir -p ${IMPORT_PATH}/ibb
 cd ${IMPORT_PATH}/ibb
 for i in $FILES
 do
-echo $i
   logger -p daemon.info fetching IBB monitoring file
   if wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@voa.his.com/pub/voa/private/merlin/$i"
   then
-    logger -p daemon.info IBB monitoring file fetched ok
+    logger -p daemon.info IBB monitoring file $i fetched ok
     php /var/www/html/audibility/import_audibility_data.php $i
+    if [ $? -ne 0 ]
+    then
+      logger -p daemon.info IBB monitoring file cannot be added to database
+    else
+      logger -p daemon.info IBB monitoring file added to database ok
+    fi
+  else
+    logger -p daemon.info IBB monitoring file cannot be fetched
   fi
 done

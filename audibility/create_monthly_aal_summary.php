@@ -44,19 +44,19 @@ if(array_key_exists('date', $_REQUEST))
         if( $d[0] != '')
         {
                 $year = $d[0];
-                $month_name = $d[1];
+                $month_number = $d[1];
         }
 }
 
 $season = get_season($year, $month_name);
-$month = season_month($season, $month_name);
+$month = season_month($season, $month_number);
 $q = get_times($season, $month);
 $start_date = $q->start_date;
 $stop_date = $q->stop_date;
 $month_name = $q->month_name;
 $map = get_target_areas();
 $regions = get_regions($map);
-$title = "Create Saved Audibility Report for $month_name ($season) Frozen on $freeze";
+$title = "Create Saved AAL Report for $month_name ($season) Frozen on $freeze";
 ?>
 <HTML>
 <HEAD>
@@ -66,12 +66,12 @@ $title = "Create Saved Audibility Report for $month_name ($season) Frozen on $fr
 <BODY>
 <?php
 	print "<H1>$title</H1>"; 
-	$query = "DELETE FROM saved_monthly_summaries WHERE month = '$start_date'";
+	$query = "DELETE FROM aal_monthly_summaries WHERE month = '$start_date'";
 	$result = pg_query($query) or die('Query failed: ' . pg_last_error());
 	$dates->start = $start_date;
 	$dates->stop = $stop_date;
 	$dates->freeze = $freeze;
-	save_monthly_summary($dbconn, $season, $dates);
+	save_monthly_aal_summary($dbconn, $season, $dates);
 	pg_close($dbconn);
 	print "<BR/>Done";
 ?>

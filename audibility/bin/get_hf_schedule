@@ -1,8 +1,15 @@
 #!/bin/sh
 . /etc/default/audibility
-FILE=`curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip --list "$HF_URL" | tail -1`
+if [ $# -eq 0 ]
+then
+  FILE=`curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip --list "$HF_URL" | tail -1`
+else
+  FILE=$1
+fi
 if curl --user $HF_USER:$HF_PASSWORD -s --ftp-pasv --ftp-skip-pasv-ip -o $FILE "$HF_URL/$FILE"
 then
-  logger -p daemon.info HF schedule file fetched ok
+  logger -p daemon.info HF schedule file $FILE fetched ok
   php /var/www/html/audibility/upload_hf_schedule.php $FILE
+else
+  logger -p daemon.info HF schedule file $FILE cannot be fetched
 fi

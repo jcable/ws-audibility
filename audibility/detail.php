@@ -31,8 +31,10 @@ function show_detail_header($investigation, $start_date, $stop_date, $month_name
 function show_detail_row($line)
 {
     global $freeze;
+    $used = 0;
     if($line["best"]) {
         $class="usedrow";
+        $used = 1;
     } else {
         $class="unusedrow";
     }
@@ -52,6 +54,7 @@ function show_detail_row($line)
     }
     print "</TD>";
     print "</TR>\n";
+    return $used;
 }
 
 function show_detail_score($score_to_show)
