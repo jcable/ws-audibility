@@ -12,7 +12,7 @@ if(count($argv)==2)
 }
 else
 {
-        $d = $_GET['date'];
+        $d = $_REQUEST['date'];
         $d = substr($d, 0, 8)."01";
         $date = DateTime::createFromFormat('Y-m-d', $d);
 }
@@ -32,15 +32,13 @@ $file = "Aubilility_$start_date.xlsx";
 
 $objPHPExcel = new PHPExcel();
 
-// Set properties
-//echo date('H:i:s') . " Set properties\n";
 $objPHPExcel->getProperties()->setCreator("WS Audibility");
 $objPHPExcel->getProperties()->setLastModifiedBy("WS Audibility");
 $objPHPExcel->getProperties()->setTitle("Aubilility Report for $start_date");
 $objPHPExcel->getProperties()->setSubject("World Service HF Audibility");
 $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 
-	$goodrow = array( 'fill' => array( 'type' => PHPExcel_Style_Fill::FILL_SOLID, 'color' => array('rgb' => '339966')));
+	$goodrow = array( 'fill' => array( 'type' => PHPExcel_Style_Fill::FILL_SOLID, 'color' => array('rgb' => '1CED46')));
 	$badrow = array( 'fill' => array( 'type' => PHPExcel_Style_Fill::FILL_SOLID, 'color' => array('rgb' => 'FF99CC')));
 
 	// Investigations for the month
@@ -82,7 +80,6 @@ $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 	// Report Summary
 	$sheetId = 1;
 	$sheet = $objPHPExcel->createSheet(NULL, $sheetId);
-	//$objPHPExcel->setActiveSheetIndex($sheetId);
 	$sheet->setTitle("Summary");
 
 	$title = "AAL Report for ".$date->format("F Y")."($season)";
@@ -102,8 +99,8 @@ $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 			$sheet->SetCellValue("A$row_number", $h);
 			$service = $row['Service'];
 			$ta = $row['Target Area'];
+			$row_number++;
 		}
-		$row_number++;
 		$start_text = $row['Start'];
 		$end_text = $row['End'];
 		$start = DateTime::createFromFormat('G:i:sO', $start_text);
@@ -143,7 +140,9 @@ $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 				$style = $badrow;
 			}
 			$sheet->getStyleByColumnAndRow($col_number, $row_number)->applyFromArray($style);
+			$col_number++;
 		}
+		$row_number++;
 	}
 
 	// Detail pages for pages with investigations
@@ -153,21 +152,50 @@ $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 	$dy = new DateInterval("P1D");
 	$stop = $date->add($mo)->sub($dy);
 	$stop_date = $stop->format("Y-m-d");
-        foreach($investigations as $investigation) {
+        foreach($investigations as $inv) {
 		$sheetId++;
 		$sheet = $objPHPExcel->createSheet(NULL, $sheetId);
-		//$objPHPExcel->setActiveSheetIndex($sheetId);
-		$sheet->setTitle("detail $sheetId");
-		 $sql = query_for_detail_aal($investigation['language'], $investigation['ta_name'], "", 
-				$investigation['start'], $start_date, $stop_date, "");
+		$sheet->setTitle($inv["sheet"]);
+		$row_number=1;
+		$sheet->setCellValueByColumnAndRow(0, $row_number, $inv['summary']);
+		$row_number++;
+		$sheet->setCellValueByColumnAndRow(0, $row_number, 'date');
+		$sheet->setCellValueByColumnAndRow(1, $row_number, 'start');
+		$sheet->setCellValueByColumnAndRow(2, $row_number, 'time');
+		$sheet->setCellValueByColumnAndRow(3, $row_number, 'stn');
+		$sheet->setCellValueByColumnAndRow(4, $row_number, 'frequency');
+		$sheet->setCellValueByColumnAndRow(5, $row_number, 'aal');
+		$sheet->setCellValueByColumnAndRow(6, $row_number, 's');
+		$sheet->setCellValueByColumnAndRow(7, $row_number, 'd');
+		$sheet->setCellValueByColumnAndRow(8, $row_number, 'o');
+		$sheet->getStyle('A1:I2')->applyFromArray(array( 'font' => array( 'bold' => true )));
+		$row_number++;
+		$sql = query_for_detail_aal($inv['language'], $inv['ta_name'], "", $inv['start'], $start_date, $stop_date, "");
 		foreach ($dbh->query($sql) as $row) {
-//print_r($row);
+			$start = DateTime::createFromFormat ("H:i:s", substr($row['start'], 0, 8));
+			$time = DateTime::createFromFormat ("H:i:s", substr($row['time'], 0, 8));
+			$sheet->setCellValueByColumnAndRow(0, $row_number, $row['date']);
+			$sheet->setCellValueByColumnAndRow(1, $row_number, $start->format("H:i:s"));
+			$sheet->setCellValueByColumnAndRow(2, $row_number, $time->format("H:i:s"));
+			$sheet->setCellValueByColumnAndRow(3, $row_number, $row['stn']);
+			$sheet->setCellValueByColumnAndRow(4, $row_number, $row['frequency']);
+			$sheet->setCellValueByColumnAndRow(5, $row_number, $row['aal']);
+			$sheet->setCellValueByColumnAndRow(6, $row_number, $row['s']);
+			$sheet->setCellValueByColumnAndRow(7, $row_number, $row['d']);
+			$sheet->setCellValueByColumnAndRow(8, $row_number, $row['o']);
+			$row_number++;
+		}
+		$sheet->getColumnDimension('A')->setWidth(10);
+		foreach(range('B','I') as $columnID) {
+		    $sheet->getColumnDimension($columnID)->setAutoSize(true);
 		}
         }
-header("Content-Type: application/vnd.ms-excel");
+	$objPHPExcel->setActiveSheetIndex(0);
+header("Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 header('Content-Disposition: attachment; filename="'.$file.'"');
 header("Cache-Control: max-age=0");
 $objWriter = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel2007');
-//$objWriter->save("php://output");
+$objWriter->save("php://output");
+//$objWriter->save($file);
 
 ?>
