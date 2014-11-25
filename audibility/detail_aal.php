@@ -177,7 +177,9 @@ else
 	if(count($mon_sched)>0)
     	show_array_in_html_table("Monitoring Schedule", "mon_tab", $mon_sched);
 	else
-		print "no monitoring schedule records for query $mon_sched_query";
+	{
+		//print "no monitoring schedule records for query $mon_sched_query";
+	}
 ?>
 </TD>
 </TR>

@@ -264,12 +264,36 @@ function count_rows($dbconn,$tab)
 }
 
 function
-save_monthly_aal_summary_for_timeslot($dbconn, $target_area, $service, $service_start_time, $slot_start_time, $target, $start_date, $stop_date, $freeze)
+save_monthly_aal_summary($dbconn, $season, $dates)
+{
+  $start_date = $dates->start;
+  $stop_date = $dates->stop;
+  $freeze_date = $dates->freeze;
+  $result = pg_query($dbconn, "DELETE FROM aal_monthly_summaries WHERE month='$start_date'") or die('Query failed: '.pg_last_error());
+  $query = "INSERT INTO aal_monthly_summaries (target_area,service,start_time,month,target,freeze_date,score)"
+	." SELECT a.target_area,a.service, a.start as start_time,"
+	." '$start_date'::date, avg(target), '$freeze_date'::date, round(20*avg(CASE WHEN o IS NULL THEN 0 ELSE o END)) as score"
+	." FROM aal_mon a LEFT JOIN parsed_observations o"
+	." ON o.stn = any(a.stn) AND o.language = any(a.language)"
+	." WHERE a.aal=true"
+	." AND o.date BETWEEN '$start_date' AND '$stop_date'"
+	." AND o.row_timestamp <= '$freeze_date'::timestamp"
+	." AND o.time BETWEEN a.start AND (a.start + '00:30:00'::interval)"
+	." GROUP by target_area,service,start";
+echo "$query<br/>\n";
+	$result = pg_query($dbconn, $query);
+	pg_free_result($result);
+  print "<br>created summaries<br>\n";
+  flush(); ob_flush();
+}
+
+function
+save_monthly_aal_summary_for_timeslot($dbconn, $target_area, $service, $service_start_time, $slot_start_time, $start_date, $stop_date, $freeze)
 {
 	$query = "INSERT INTO aal_monthly_summaries (target_area,service,start_time,month,target,freeze_date,score)"
-	." SELECT target_area,service,'$slot_start_time'::time as start_time,"
-	." '$start_date'::date, $target as target,'$freeze'::date, round(20*avg(o)) as score"
-	." FROM parsed_observations o JOIN aal_mon a"
+	." SELECT a.target_area,a.service,'$slot_start_time'::time as start_time,"
+	." '$start_date'::date, target, '$freeze'::date, round(20*avg(CASE WHEN o IS NULL THEN 0 ELSE o END)) as score"
+	." FROM aal_mon a LEFT JOIN parsed_observations o"
 	." ON o.stn = any(a.stn) AND o.language = any(a.language)"
 	." WHERE a.aal=true"
 	." AND a.start = '$service_start_time'::time"
@@ -278,12 +302,13 @@ save_monthly_aal_summary_for_timeslot($dbconn, $target_area, $service, $service_
 	." AND o.date BETWEEN '$start_date' AND '$stop_date'"
 	." AND o.time BETWEEN '$slot_start_time'::time AND ('$slot_start_time'::time + '00:30:00'::interval)"
 	." GROUP by target_area,service,start";
+echo "$query<br/>\n";
 	$result = pg_query($dbconn, $query);
 	pg_free_result($result);
 }
 
 function
-save_monthly_aal_summary($dbconn, $season, $dates)
+save_monthly_aal_summary1($dbconn, $season, $dates)
 {
   $start_date = $dates->start;
   $stop_date = $dates->stop;
@@ -302,7 +327,9 @@ save_monthly_aal_summary($dbconn, $season, $dates)
     return;
   }
   $step = new DateInterval("PT30M");
+  //print_r($groups);
   foreach($groups as $group) {
+    try {
         $target_area = $group['Target Area'];
         $service = $group['Service'];
         $start_time = $group['Start'];
@@ -311,16 +338,25 @@ save_monthly_aal_summary($dbconn, $season, $dates)
 	$end = DateTime::createFromFormat('G:i:sO', $group['End']);
 	for($t = $start; $t<$end; $t->add($step)) {
 		$duration = $t->diff($end);
-		if($duration->format("%H:%I") != "00:00") {
+		$ss = $duration->s+60*($duration->i+60*$duration->h);
+		if($ss>=60) {
 			$slot_start = $t->format('G:i:s');
-			print "<br>creating summary for $service in $target_area at $slot_start<br>\n";
+			print "<br/>creating summary for $service in $target_area at $slot_start.\n";
 			save_monthly_aal_summary_for_timeslot($dbconn, 
 				$target_area, $service, $start_time, $slot_start, $score,
                 		$start_date, $stop_date, $freeze_date);
 		}
+		else {
+			print "<br/>Not creating summary for $service in $target_area at $slot_start because "
+				. $duration->format("%H:%I") . " is too short a duration.\n";
+		}
 	}
-	flush(); ob_flush();
+    } catch (Exception $e) {
+        echo 'Caught exception: ',  $e->getMessage(), "\n";
+    }
   }
+  print "<br>created summaries<br>\n";
+  flush(); ob_flush();
 }
 
 /*
@@ -872,6 +908,33 @@ get_target_areas()
 }
 
 function
+get_regions_pdo($conn)
+{
+  $regions = array();
+  $sql = 'SELECT * FROM "Region Reporting Order" ORDER BY "order"';
+  foreach ($conn->query($sql) as $row) {
+	$reg = $row["order"] + 0;
+	$name = $row["name"];
+	$regions[$reg]->name = $name;
+  }
+  return $regions;
+}
+
+function
+get_target_areas_pdo($conn)
+{
+  $map = array();
+  $sql = 'SELECT id,name,abbr FROM target_areas';
+  foreach ($conn->query($sql) as $row) {
+      $id = trim($row["id"]);
+      $name = trim($row["name"]);
+      $map[$id] =(object) array('id' =>$id, 'name' =>$name, 'abbr' =>trim($row["abbr"]));
+      $map[$name] =(object) array('id' =>$id, 'name' =>$name, 'abbr' =>trim($row["abbr"]));
+  }
+  return $map;
+}
+
+function
 report_and_correct_sla_errors()
 {
   global $dbconn;
@@ -992,7 +1055,7 @@ function query_for_aal($service, $season, $target_area, $start_time)
         $query .= ' "Service"='."'$service'";
         $query .= ' AND "Season"='."'$season'";
         $query .= ' AND "Target Area"='."'$target_area'";
-        $query .= ' AND "Start"='."'$start_time'";
+        $query .= ' AND '."'$start_time'".' BETWEEN "Start" AND "End"';
 	return $query;
 }
 
@@ -1022,13 +1085,14 @@ function query_for_detail_aal($service, $target_area, $service_start_time, $slot
 	." FROM parsed_observations o JOIN aal_mon a"
 	." ON o.stn = any(a.stn)"
 	." AND o.language = any(a.language)"
-	." WHERE a.start = '$service_start_time'"
-	." AND a.service= '$service'"
+	." WHERE a.service= '$service'"
 	." AND a.target_area = '$target_area'"
 	." AND o.time BETWEEN '$slot_start_time' AND ('$slot_start_time' + '00:30:00'::interval)"
 	." AND o.date BETWEEN '$start_date' AND '$stop_date'";
+    if($service_start_time != "")
+ 	$query .= " AND a.start = '$service_start_time'";
     if($freeze != "")
-	$query ." AND o.row_timestamp <= TIMESTAMP '$freeze'";
+	$query .= " AND o.row_timestamp <= TIMESTAMP '$freeze'";
     $query .= " ORDER BY o.date, o.o DESC";
 //print "<pre>\n$query\n</PRE>\n";
     return $query;
@@ -1146,6 +1210,40 @@ function get_investigations($tracconn, $month, $season, $map)
 		$investigations[$id] = $investigation;
 	}
 	pg_free_result($summary_pg_query);
+	return $investigations;
+}
+
+function get_investigations_pdo($conn, $month, $season, $map)
+{
+	$report_id = $month.$season;
+	$trac_query = "SELECT"
+		. " ticket.id as ticket_id,"
+		. " ticket.type as action,"
+		. " ticket.summary as summary,"
+		. " ticket.description as notes"
+		. " FROM ticket JOIN ticket_custom ON ticket.id = ticket_custom.ticket"
+		. " WHERE ticket_custom.name = 'report_id'"
+		. " AND ticket_custom.value = '$report_id'";
+	$investigations = array();
+        foreach ($conn->query($trac_query) as $investigation) {
+		// add detail from custom_ticket table
+		$id = $investigation["ticket_id"];
+		$query = "SELECT name, value FROM ticket_custom WHERE ticket = $id";
+                foreach ($conn->query($query) as $line) {
+			if($line["name"] == 'language')
+				$investigation["language"] = $line["value"];
+			if($line["name"] == 'target_area')
+			{
+				$investigation["ta_name"] = $line["value"];
+				$investigation["tan"] = $line["value"];
+				$investigation["ta_abbr"] = $map[$line["value"]]->abbr;
+				$investigation["ta"] = $map[$line["value"]]->id;
+			}
+			if($line["name"] == 'timeslot')
+				$investigation["start"] = $line["value"];
+		}
+		$investigations[$id] = $investigation;
+	}
 	return $investigations;
 }
 

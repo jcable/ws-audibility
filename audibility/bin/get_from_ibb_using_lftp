@@ -6,17 +6,11 @@ HOST=$IBB_HOST
 FTPURL="ftp://$USER:$PASS@$HOST"
 LCD=$IMPORT_PATH/ibb
 RCD=$IBB_PATH
-lftp -c "set ftp:list-options -a; open '$FTPURL'; lcd $LCD; cd $RCD; mirror --log=lftp.log --verbose --only-missing --use-cache --no-recursion;"
-for i in `sed -e 's:^.*/::' -e '/^BBC/d' lftp.log`
+lftp -c "set ftp:list-options -a; open '$FTPURL'; lcd $LCD; cd $RCD; mirror --log=/tmp/lftp.log --verbose --only-missing --use-cache --no-recursion;"
+for i in `sed -e 's:^.*/::' -e '/^BBC/d' /tmp/lftp.log`
 do
-    echo importing $i
-    logger -p daemon.info fetched IBB file $i 
-    php /var/www/html/audibility/import_audibility_data.php $i
-    if [ $? -ne 0 ]
-    then
-      logger -p daemon.info IBB file $i cannot be added to database
-    else
-      logger -p daemon.info IBB file $i added to database ok
-    fi
+  logger -p daemon.info fetched IBB file $i 
 done
-rm lftp.log
+#rm /tmp/lftp.log
+#php /var/www/html/audibility/import_new_audibility_data.php > /dev/null 2>&1
+php /var/www/html/audibility/import_new_audibility_data.php

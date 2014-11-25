@@ -20,7 +20,7 @@ $month_name = $prev->format('m');
 if(count($argv)==4)
 {
   $year = $argv[1];
-  $month_name = $argv[2];
+  $month_number = $argv[2];
   $freeze = $argv[3];
 }
 

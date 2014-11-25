@@ -2,7 +2,7 @@
 <HTML>
 <HEAD>
 <TITLE>HF Audibility</TITLE>
-<meta http-equiv="REFRESH" content="0;url=/cgi-bin/trac.cgi">
+<meta http-equiv="REFRESH" content="0;url=/trac">
 </HEAD>
 <BODY>
 You are being redirected to the trac home page.
