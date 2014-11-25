@@ -22,22 +22,46 @@ function import_file($dbh, $file) {
 	$bsr_header = get_header($objWorksheet, 2, 0, 10);
 	$tx_header = get_header($objWorksheet, 2, 11, 22);
 	$aal_header = get_header($objWorksheet, 2, 23, 31);
-	$mon_header = get_header($objWorksheet, 2, 32, 43);
+	$aal_mon_cols = array();
+	$other_mon_cols = array();
+	$aal_col = 0;
+	for($c=1; $c<$highestColumnIndex; $c++) {
+		$rgb = $objWorksheet->getStyleByColumnAndRow($c,2)->getFill()->getStartColor()->getRGB();
+		$h = $objWorksheet->getCellByColumnAndRow($c,2)->getValue();
+		if(substr($h, 0, 3) == "RMS")
+		{
+			if($rgb == "FFCC00") // orange for AAL
+			{
+				$aal_mon_cols[] = $c;
+			}
+			if($rgb == "1FB714") // Green for other monitoring
+			{
+				$other_mon_cols[] = $c;
+			}
+		}
+		if(substr($h, 0, 3) == "AAL")
+		{
+			$aal_col = $c;
+		}
+	}
 	$header = $objWorksheet->getCellByColumnAndRow('A',1)->getValue();
 	$season = substr($header, 0, 3);
 	clear_season($dbh, $season);
 	for ($row = 3; $row <= $highestRow; ++$row) {
 	    $data = get_bsr_row($objWorksheet, $row, $bsr_header);
+	    $tx_data = get_tx_row($objWorksheet, $row, $tx_header);
 	    if($data['Service'] != '' && $data['Service Grade'] != '') {
 		$bsr_data = $data;
 		$bsr_data['Season'] = $season;
+		$aal = $objWorksheet->getCellByColumnAndRow($aal_col, $row)->getCalculatedValue();
 		$count += put_bsr($dbh, $bsr_data);
+	        $aal_mon_data = get_mon_row($objWorksheet, $row, $aal_mon_cols);
+		$aal_mon_data["aal"] = $aal;
+	        $other_mon_data = get_mon_row($objWorksheet, $row, $other_mon_cols);
+		$other_mon_data["aal"] = $aal;
+	        put_mon($dbh, $bsr_data, $tx_data, $aal_mon_data, $other_mon_data);
             }
-	    $tx_data = get_tx_row($objWorksheet, $row, $tx_header);
-	    $aal_data = get_mon_row($objWorksheet, $row, $aal_header);
-	    $mon_data = get_mon_row($objWorksheet, $row, $mon_header);
 	    put_tx($dbh, $bsr_data, $tx_data);
-	    put_mon($dbh, $bsr_data, $tx_data, $aal_data, $mon_data);
 	}
 
 	$objXLS->disconnectWorksheets();
@@ -115,30 +139,54 @@ function put_tx($dbh, $bsr_data, $tx_data) {
     $sth->bindParam(14, $dates["end"], PDO::PARAM_STR);
     $sth->execute();
 }
+
 //start target_area town aal season language stn service 
 function put_mon($dbh, $bsr_data, $tx_data, $aal_data, $mon_data) {
-    $query = 'INSERT INTO aal_mon(start, target_area, town, aal, season, language, service, stn)'
-	.'SELECT ?,?,?,?,?,?,?, ARRAY(SELECT stn FROM ms WHERE town=?)';
+    $query = 'INSERT INTO aal_mon(start, target_area, town, aal, season, language, service, stn, target)'
+	.'SELECT ?,?,?,?,?,?,?, ARRAY(SELECT stn FROM ms WHERE town=ANY(?)),?';
     $sth = $dbh->prepare($query);
-    $sth->bindParam(1, $bsr_data['Timeslot Start'], PDO::PARAM_STR);
-    $sth->bindParam(2, $bsr_data['WPLOT Target Area'], PDO::PARAM_STR);
-    $sth->bindParam(5, $bsr_data['Season'], PDO::PARAM_STR);
-    $language = "{".$tx_data['Language']."}";
-    $sth->bindParam(6, $language, PDO::PARAM_STR);
-    $sth->bindParam(7, $bsr_data['Service'], PDO::PARAM_STR);
-    put_mon1($sth, $aal_data, 1);
-    put_mon1($sth, $mon_data, 0);
+    $ts = $bsr_data['Timeslot Start'];
+    $te = $bsr_data['Timeslot End'];
+    $dts = new DateTime($ts);
+    if($dts->format('s')=='30')
+	$dts->add(new DateInterval('PT30S'));
+    $dte = new DateTime($te);
+    if($dte->format('s')=='30')
+	$dte->add(new DateInterval('PT30S'));
+    $tss = $dts->getTimestamp();
+    $tse = $dte->getTimestamp();
+    if($tse<$tss)
+    {
+       $tse += 86400;
+    }
+    $dur = $tse - $tss;
+    $minutes = $dur / 60;
+    $slots = round($minutes / 30);
+    for($i=0; $i<$slots; $i++)
+    {
+	    $n = new DateTime();
+	    $n->setTimestamp($tss+1800*$i);
+	    $slot_start = $n->format("H:i:s");
+	    $sth->bindParam(1, $slot_start, PDO::PARAM_STR);
+	    $sth->bindParam(2, $bsr_data['WPLOT Target Area'], PDO::PARAM_STR);
+	    $sth->bindParam(5, $bsr_data['Season'], PDO::PARAM_STR);
+	    $language = "{".$tx_data['Language']."}";
+	    $sth->bindParam(6, $language, PDO::PARAM_STR);
+	    $sth->bindParam(7, $bsr_data['Service'], PDO::PARAM_STR);
+	    $target = $aal_data["aal"];
+	    $sth->bindParam(9, $target, PDO::PARAM_INT);
+	    put_mon1($sth, $aal_data, 1);
+	    put_mon1($sth, $mon_data, 0);
+    }
 }
 
 function put_mon1($sth, $data, $aal) {
     $sth->bindParam(4, $aal, PDO::PARAM_BOOL);
-    foreach($data['town'] as $town) {
-if($town != '') {
-        $sth->bindParam(3, $town, PDO::PARAM_STR);
-        $sth->bindParam(8, $town, PDO::PARAM_STR);
-        $sth->execute();
-}
-    }
+    $t1 = $data['town'][0];
+    $t2 = '{'.implode(',',$data['town']).'}';
+    $sth->bindParam(3, $t1, PDO::PARAM_STR);
+    $sth->bindParam(8, $t2, PDO::PARAM_STR);
+    $sth->execute();
 }
 
 function hhmm($t)
@@ -217,18 +265,15 @@ function get_tx_row($sheet, $row, $header)
     return $data;
 }
 
-function get_mon_row($sheet, $row, $header)
+function get_mon_row($sheet, $row, $cols)
 {
-    $data = array();
-    get_cell($data, $sheet, $row, 'AAL', $header);
     $town = array();
-    for($i=1; $i<10; $i++) { 
-      $col = "RMS $i";
-      if(array_key_exists($col, $header)) { 
-        $town[] = trim($sheet->getCellByColumnAndRow($header[$col], $row)->getCalculatedValue());
-      }
+    foreach($cols as $col) { 
+        $t = trim($sheet->getCellByColumnAndRow($col, $row)->getCalculatedValue());
+	if($t != '')
+		$town[] = $t;
     }
-    $data['town'] = $town;
+    $data = array('town' => $town);
     return $data;
 }
 

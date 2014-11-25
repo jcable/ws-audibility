@@ -1,6 +1,6 @@
 <?php
 
-	function import_ibb_file($dbh, $file) {
+function import_ibb_file($dbh, $file) {
 	$dbh->exec("TRUNCATE TABLE raw_observations");
 	$stmt = $dbh->prepare("INSERT INTO raw_observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
 

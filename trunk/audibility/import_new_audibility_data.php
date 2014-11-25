@@ -9,20 +9,27 @@
 
   $sql = "select distinct filesource from parsed_observations where filesource like '$match%'";
 
-$available = glob("$match*");
+echo "found imported filenames\n";
+$available = glob("/var/www/html/audibility/import/ibb/$match*");
 
 $parsed = array();
 foreach( $dbh->query($sql) as $row) {
-	$parsed[] = $row['filesource'];
+	$p = trim($row['filesource']);
+	$parsed[] = $p;
+	echo "$p\n";
 }
+echo "found available filenames\n";
 
-foreach( $available as $filename) {
+foreach( $available as $path) {
+	$filename = trim(basename($path));
+	echo "$filename\n";
 	if(!in_array($filename, $parsed)) {
-		echo $filename." to do\n";
-		import_ibb_file($dbh, $filename);
+		echo "importing $filename\n";
+		import_ibb_file($dbh, $path);
 		`logger -p daemon.info IBB file $filename added to database ok`;
 	}
 }
+echo "done\n";
 
 $dbh->exec("VACUUM parsed_observations");
 
