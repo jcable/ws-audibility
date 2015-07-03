@@ -3,6 +3,7 @@
 date_default_timezone_set("UTC");
 require_once("report_template_functions.php");
 $dbh = pdo_login('wsdata', 'PG_USER', 'PG_PASSWORD');
+$dagger = "&#8224;";
 
 if(count($argv)==2)
 {
@@ -14,7 +15,11 @@ else
 	$d = substr($d, 0, 8)."01";
 	$date = DateTime::createFromFormat('Y-m-d', $d);
 }
-$season = get_season($date->format("Y"), $date->format("m"));
+$year_number = $date->format("Y");
+$month_number = $date->format("m");
+$season = get_season($date->format("Y"), $month_number);
+$month = season_month($season, $month_number);
+$q = get_times($season, $month);
 $title = "AAL Report for ".$date->format("F Y")." ($season)";
 ?>
 <HTML>
@@ -26,11 +31,13 @@ $title = "AAL Report for ".$date->format("F Y")." ($season)";
 <FORM><INPUT TYPE="button" VALUE="Back" onClick="history.go(-1);return true;"></FORM>
 <?php
 	print "<H1>$title</H1>";
-	$query = "SELECT service,target_area,start_time,target,score,freeze_date"
+	print "Note - scores prefixed by a $dagger symbol have no nominated monitoring location for AAL measurement.<BR/>\n";
+	// TODO make sure DISTINCT not required
+	$query = "SELECT DISTINCT service,target_area,start_time,target,aal_score,other_score,freeze_date"
 		." FROM aal_monthly_summaries WHERE month=:month"
 		." ORDER BY service,target_area,start_time";
 	$sth = $dbh->prepare($query, array(PDO::ATTR_CURSOR => PDO::CURSOR_FWDONLY));
-	$month=$date->format('Y-m-d');
+	$month=$q->start_date;
     	$sth->execute(array(':month' => $month));
 	$scores = $sth->fetchAll();
 	$ts = "";
@@ -54,23 +61,35 @@ $title = "AAL Report for ".$date->format("F Y")." ($season)";
 			print $rs; $rs = "</TR>\n";
 			print "<TR>";
 		}
+		$score = $row['aal_score'];
+		if($score == '')
+			$score = $row['other_score'];
 		$link = "detail_aal.php"
 			."?ta=$ta"
 			."&service=$service"
-			."&month=$month"
+			."&year=$year_number"
+			."&month=$month_number"
 			."&slot_start=".$s
 			."&target=".$row['target']
-			."&score=".$row['score']
+			."&score=".$score
 			."&freeze=".$row['freeze_date'];
 		print "<TD class='";
-		if($row['score']>=$row['target']) {
+		$score = $row['aal_score'];
+		if($score == '')
+			$score = $dagger.$row['other_score'];
+		if($score == $dagger)
+			$score = '?';
+		if($score=='?') {
+			print "nodatarow";
+		}
+		else if($score>=$row['target']) {
 			print "goodrow";
 		}
 		else {
 			print "badrow";
 		}
 		print "'>";
-		print "<A href='".$link."'>$s: ".$row['score']."/".$row['target']."</A>";
+		print "<A href='$link'>$s: $score/".$row['target']."</A>";
 		print "</TD>";
 	}
 	print "</TR>\n</TABLE>";

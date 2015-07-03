@@ -65,7 +65,7 @@ $title = "Create Saved AAL Report for $month_name ($season) Frozen on $freeze";
 </HEAD>
 <BODY>
 <?php
-	print "<H1>$title</H1>"; 
+	print "<H1>$title</H1>\n"; 
 	$query = "DELETE FROM aal_monthly_summaries WHERE month = '$start_date'";
 	$result = pg_query($query) or die('Query failed: ' . pg_last_error());
 	$dates->start = $start_date;

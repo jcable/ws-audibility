@@ -270,17 +270,41 @@ save_monthly_aal_summary($dbconn, $season, $dates)
   $stop_date = $dates->stop;
   $freeze_date = $dates->freeze;
   $result = pg_query($dbconn, "DELETE FROM aal_monthly_summaries WHERE month='$start_date'") or die('Query failed: '.pg_last_error());
-  $query = "INSERT INTO aal_monthly_summaries (target_area,service,start_time,month,target,freeze_date,score)"
-	." SELECT a.target_area,a.service, a.start as start_time,"
-	." '$start_date'::date, avg(target), '$freeze_date'::date, round(20*avg(CASE WHEN o IS NULL THEN 0 ELSE o END)) as score"
-	." FROM aal_mon a LEFT JOIN parsed_observations o"
-	." ON o.stn = any(a.stn) AND o.language = any(a.language)"
-	." WHERE a.aal=true"
-	." AND o.date BETWEEN '$start_date' AND '$stop_date'"
-	." AND o.row_timestamp <= '$freeze_date'::timestamp"
-	." AND o.time BETWEEN a.start AND (a.start + '00:30:00'::interval)"
-	." GROUP by target_area,service,start";
-echo "$query<br/>\n";
+  $query = <<<"EOD"
+INSERT INTO aal_monthly_summaries (target_area,service,start_time,month,target,freeze_date,aal_score,other_score)
+	 SELECT a.target_area,a.service, a.start as start_time,
+	 '$start_date'::date as month, avg(target) as target, '$freeze_date'::date,
+	 round(20*avg(CASE WHEN o.o IS NULL THEN 0 ELSE o.o END)),
+	 round(20*avg(CASE WHEN q.o IS NULL THEN 0 ELSE q.o END))
+	 FROM aal_mon a
+	 JOIN parsed_observations o
+	 ON o.stn = any(a.aal_stn) AND o.language = any(a.language)
+	 JOIN parsed_observations q
+	 ON q.stn = any(a.other_stn) AND q.language = any(a.language)
+	 WHERE o.date BETWEEN '$start_date' AND '$stop_date'
+	 AND o.row_timestamp <= '$freeze_date'::timestamp
+	 AND o.time BETWEEN a.start AND (a.start + '00:30:00'::interval)
+	 AND q.date BETWEEN '$start_date' AND '$stop_date'
+	 AND q.row_timestamp <= '$freeze_date'::timestamp
+	 AND q.time BETWEEN a.start AND (a.start + '00:30:00'::interval)
+	 GROUP by target_area,service,start
+EOD;
+	//$result = pg_query($dbconn, $query);
+	//pg_free_result($result);
+    $result = pg_query("CREATE TEMP TABLE p AS SELECT round(20*avg(CASE WHEN o IS NULL THEN 0 ELSE o END)) AS o, target_area, service, start FROM parsed_observations o JOIN aal_mon a ON o.stn = any(a.aal_stn) AND o.language = any(a.language) WHERE o.date BETWEEN '$start_date' AND '$stop_date' AND o.row_timestamp <= '$freeze_date'::timestamp AND o.time BETWEEN a.start AND (a.start + '00:30:00'::interval) GROUP by target_area,service,start");
+    pg_free_result($result);
+echo "created AAL scores\n";
+    $result = pg_query("CREATE TEMP TABLE q AS SELECT round(20*avg(CASE WHEN o IS NULL THEN 0 ELSE o END)) AS o, target_area, service, start FROM parsed_observations o JOIN aal_mon a ON o.stn = any(a.other_stn) AND o.language = any(a.language) WHERE o.date BETWEEN '$start_date' AND '$stop_date' AND o.row_timestamp <= '$freeze_date'::timestamp AND o.time BETWEEN a.start AND (a.start + '00:30:00'::interval) GROUP by target_area,service,start");
+    pg_free_result($result);
+echo "created other scores\n";
+    $query = <<<"EOD"
+INSERT INTO aal_monthly_summaries (target_area,service,start_time,month,target,freeze_date,aal_score,other_score)
+	 SELECT a.target_area, a.service, a.start as start_time,
+	 '$start_date'::date as month, a.target, '$freeze_date'::date, p.o, q.o
+	 FROM aal_mon a
+	 LEFT JOIN p ON a.service=p.service AND a.target_area=p.target_area AND a.start=p.start
+	 LEFT JOIN q ON a.service=q.service AND a.target_area=q.target_area AND a.start=q.start
+EOD;
 	$result = pg_query($dbconn, $query);
 	pg_free_result($result);
   print "<br>created summaries<br>\n";
@@ -302,7 +326,6 @@ save_monthly_aal_summary_for_timeslot($dbconn, $target_area, $service, $service_
 	." AND o.date BETWEEN '$start_date' AND '$stop_date'"
 	." AND o.time BETWEEN '$slot_start_time'::time AND ('$slot_start_time'::time + '00:30:00'::interval)"
 	." GROUP by target_area,service,start";
-echo "$query<br/>\n";
 	$result = pg_query($dbconn, $query);
 	pg_free_result($result);
 }
@@ -1019,7 +1042,11 @@ show_array_in_html_table($title, $id, $data)
     print "<TR>";
     foreach($row as $name =>$val)
     {
-      print "<TD>$val</TD>\n";
+      if($val[0]=="{")
+	$v = substr($val, 1, strlen($val)-2);
+      else
+	$v = $val;
+      print "<TD>$v</TD>\n";
     }
     print "</TR>";
   }
@@ -1078,19 +1105,15 @@ function query_for_detail($language, $season, $target_area, $start_time, $start_
 	return $query;
 }
 
-function query_for_detail_aal($service, $target_area, $service_start_time, $slot_start_time,
-	$start_date, $stop_date, $freeze)
+function query_for_detail_aal($service, $target_area, $slot_start_time, $start_date, $stop_date, $freeze)
 {
-    $query = "SELECT DISTINCT o.date, a.start, o.time, o.stn, o.frequency, a.aal, o.s, o.d, o.o"
+    $query = "SELECT DISTINCT o.date, time, stn, frequency, target, stn=any(aal_stn) as aal, s, d, o.o"
 	." FROM parsed_observations o JOIN aal_mon a"
-	." ON o.stn = any(a.stn)"
-	." AND o.language = any(a.language)"
-	." WHERE a.service= '$service'"
-	." AND a.target_area = '$target_area'"
+	." ON o.language = any(a.language)"
+	." WHERE a.target_area = '$target_area'"
+	." AND a.service = '$service'"
 	." AND o.time BETWEEN '$slot_start_time' AND ('$slot_start_time' + '00:30:00'::interval)"
 	." AND o.date BETWEEN '$start_date' AND '$stop_date'";
-    if($service_start_time != "")
- 	$query .= " AND a.start = '$service_start_time'";
     if($freeze != "")
 	$query .= " AND o.row_timestamp <= TIMESTAMP '$freeze'";
     $query .= " ORDER BY o.date, o.o DESC";
@@ -1161,12 +1184,12 @@ function show_detail_aal($investigation, $start_date, $stop_date, $month_name, $
   if($count > 0)
     {
       $score = round(20 * $sum / $count);
-      show_detail_score($score);
     }
   else
     {
       $score = -1;
     }
+  show_detail_score($score);
   show_detail_trailer($investigation);
   return $score;
 }

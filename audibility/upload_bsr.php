@@ -50,7 +50,7 @@ function import_file($dbh, $file) {
 	for ($row = 3; $row <= $highestRow; ++$row) {
 	    $data = get_bsr_row($objWorksheet, $row, $bsr_header);
 	    $tx_data = get_tx_row($objWorksheet, $row, $tx_header);
-	    if($data['Service'] != '' && $data['Service Grade'] != '') {
+	    if($data['Service'] != '' && $data['Service Grade'] != '' && $data['Timeslot Duration'] > 0) {
 		$bsr_data = $data;
 		$bsr_data['Season'] = $season;
 		$aal = $objWorksheet->getCellByColumnAndRow($aal_col, $row)->getCalculatedValue();
@@ -141,9 +141,10 @@ function put_tx($dbh, $bsr_data, $tx_data) {
 }
 
 //start target_area town aal season language stn service 
-function put_mon($dbh, $bsr_data, $tx_data, $aal_data, $mon_data) {
-    $query = 'INSERT INTO aal_mon(start, target_area, town, aal, season, language, service, stn, target)'
-	.'SELECT ?,?,?,?,?,?,?, ARRAY(SELECT stn FROM ms WHERE town=ANY(?)),?';
+	        //put_mon($dbh, $bsr_data, $tx_data, $aal_mon_data, $other_mon_data);
+function put_mon($dbh, $bsr_data, $tx_data, $aal_mon_data, $other_mon_data) {
+    $query = 'INSERT INTO aal_mon(start, target_area, town, season, language, service, aal_stn, other_stn, target)'
+	.'SELECT ?,?,?,?,?,?, ARRAY(SELECT stn FROM ms WHERE town=ANY(?)), ARRAY(SELECT stn FROM ms WHERE town=ANY(?)),?';
     $sth = $dbh->prepare($query);
     $ts = $bsr_data['Timeslot Start'];
     $te = $bsr_data['Timeslot End'];
@@ -169,24 +170,23 @@ function put_mon($dbh, $bsr_data, $tx_data, $aal_data, $mon_data) {
 	    $slot_start = $n->format("H:i:s");
 	    $sth->bindParam(1, $slot_start, PDO::PARAM_STR);
 	    $sth->bindParam(2, $bsr_data['WPLOT Target Area'], PDO::PARAM_STR);
-	    $sth->bindParam(5, $bsr_data['Season'], PDO::PARAM_STR);
-	    $language = "{".$tx_data['Language']."}";
-	    $sth->bindParam(6, $language, PDO::PARAM_STR);
-	    $sth->bindParam(7, $bsr_data['Service'], PDO::PARAM_STR);
-	    $target = $aal_data["aal"];
+	    $t1 = $aal_mon_data['town'][0];
+	    $sth->bindParam(3, $t1, PDO::PARAM_STR);
+	    $sth->bindParam(4, $bsr_data['Season'], PDO::PARAM_STR);
+	    $language = $tx_data['Language'];
+	    if($language == 'Krwanda/Krundi')
+		$language = 'Kinyarwanda/Kirundi';
+	    $language = "{".$language."}";
+	    $sth->bindParam(5, $language, PDO::PARAM_STR);
+	    $sth->bindParam(6, $bsr_data['Service'], PDO::PARAM_STR);
+	    $aal_town = '{'.implode(',',$aal_mon_data['town']).'}';
+	    $sth->bindParam(7, $aal_town, PDO::PARAM_STR);
+	    $other_town = '{'.implode(',',$other_mon_data['town']).'}';
+	    $sth->bindParam(8, $other_town, PDO::PARAM_STR);
+	    $target = $aal_mon_data["aal"];
 	    $sth->bindParam(9, $target, PDO::PARAM_INT);
-	    put_mon1($sth, $aal_data, 1);
-	    put_mon1($sth, $mon_data, 0);
+	    $sth->execute();
     }
-}
-
-function put_mon1($sth, $data, $aal) {
-    $sth->bindParam(4, $aal, PDO::PARAM_BOOL);
-    $t1 = $data['town'][0];
-    $t2 = '{'.implode(',',$data['town']).'}';
-    $sth->bindParam(3, $t1, PDO::PARAM_STR);
-    $sth->bindParam(8, $t2, PDO::PARAM_STR);
-    $sth->execute();
 }
 
 function hhmm($t)
@@ -214,8 +214,6 @@ function get_cell(&$r, $sheet, $row, $col, $header)
 {
   if(array_key_exists($col, $header)) { 
     $val = trim($sheet->getCellByColumnAndRow($header[$col], $row)->getCalculatedValue());//getValue());
-    if($val == '#VALUE!')
-	$val = '0';
     if($col == "Days")
 	$val = strtoupper($val);
     if($col == "Timeslot Start")
@@ -226,6 +224,14 @@ function get_cell(&$r, $sheet, $row, $col, $header)
         $val = PHPExcel_Style_NumberFormat::toFormattedString($val, 'hh:mm:ss');
     if($col == "Stop Time")
         $val = PHPExcel_Style_NumberFormat::toFormattedString($val, 'hh:mm:ss');
+    if($col == "Timeslot Duration") {
+	// Work around bug in PHPExcel
+        $s = $sheet->getCellByColumnAndRow($header["Timeslot Start"], $row)->getCalculatedValue();
+        $e = $sheet->getCellByColumnAndRow($header["Timeslot End"], $row)->getCalculatedValue();
+	$val = 1 - ($s - $e);
+    }
+    if($val == '#VALUE!')
+	$val = '0';
     $r[$col] = $val;
   }
 }

@@ -40,6 +40,7 @@ $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 
 	$goodrow = array( 'fill' => array( 'type' => PHPExcel_Style_Fill::FILL_SOLID, 'color' => array('rgb' => '1CED46')));
 	$badrow = array( 'fill' => array( 'type' => PHPExcel_Style_Fill::FILL_SOLID, 'color' => array('rgb' => 'FF99CC')));
+	$nodatarow = array( 'fill' => array( 'type' => PHPExcel_Style_Fill::FILL_SOLID, 'color' => array('rgb' => 'CCCCCC')));
 
 	// Investigations for the month
 
@@ -83,66 +84,42 @@ $objPHPExcel->getProperties()->setDescription("Investigation Requests");
 	$sheet->setTitle("Summary");
 
 	$title = "AAL Report for ".$date->format("F Y")."($season)";
-	$sql = "SELECT DISTINCT * FROM aal_bsr ORDER BY \"Service\", \"Target Area\", \"Start\"";
+        $query = "SELECT DISTINCT service,target_area,start_time,target,aal_score,other_score,freeze_date"
+                ." FROM aal_monthly_summaries WHERE month=:month"
+                ." ORDER BY service,target_area,start_time";
+        $sth = $dbh->prepare($query, array(PDO::ATTR_CURSOR => PDO::CURSOR_FWDONLY));
+	$month=$date->format('Y-m-d');
+        $sth->execute(array(':month' => $month));
+        $scores = $sth->fetchAll();
 	$ta=""; $service="";
-	$step = new DateInterval("PT30M");
-	$query = "SELECT target,score,freeze_date FROM aal_monthly_summaries WHERE start_time=? AND target_area=? AND service=? AND month=?";
-	$sth = $dbh->prepare($query, array(PDO::ATTR_CURSOR => PDO::CURSOR_FWDONLY));
-	$row_number = 3;
-	foreach ($dbh->query($sql) as $row) {
-		if($row['Service']!=$service || $row['Target Area']!=$ta) {
-			$h = $row['Service'];
+	$row_number = 0;
+	foreach ($scores as $row) {
+		if($row['service']!=$service || $row['target_area']!=$ta) {
+			$service = $row['service'];
+			$ta = $row['target_area'];
+			$col_number = 0;
+			$row_number+=2;
+			$sheet->setCellValueByColumnAndRow($col_number, $row_number, $service." ".$ta);
 			$sheet->getStyle("A$row_number")->applyFromArray(array( 'font' => array( 'bold' => true )));
-			if($row['Network']!=$row['Target Area']) {
-				$h .= " ".$row['Target Area'];
-			}
-			$sheet->SetCellValue("A$row_number", $h);
-			$service = $row['Service'];
-			$ta = $row['Target Area'];
 			$row_number++;
 		}
-		$start_text = $row['Start'];
-		$end_text = $row['End'];
-		$start = DateTime::createFromFormat('G:i:sO', $start_text);
-		$end = DateTime::createFromFormat('G:i:sO', $end_text);
-		$month=$date->format('Y-m-d');
-		$row = array();
-		for($t = clone $start; $t<$end; $t->add($step)) {
-			$s = $t->format("G:i:s");
-			$p = array($s, $ta, $service, $month);
-			$sth->execute($p);
-			$scores = $sth->fetchAll();
-			$row[$s] = $scores[0];
+		$start_text = $row['start_time'];
+		$score = $row['aal_score'];
+		$target = $row['target'];
+		$sheet->setCellValueByColumnAndRow($col_number, $row_number, substr($start_text, 0, 5));
+		if($score=='') {
+			$style = $nodatarow;
+			$score = '?';
 		}
-		$col_number = 0;
-		foreach($row as $s => $v) {
-			$sheet->setCellValueByColumnAndRow($col_number, $row_number, $s);
-			$link = "detail_aal.php"
-				."?ta=$ta"
-				."&service=$service"
-				."&month=$month"
-				."&service_start=".$start->format("G:i:s")
-				."&slot_start=$s"
-				."&target=".$v['target']
-				."&score=".$v['score']
-				."&freeze=".$v['freeze_date'];
-			$col_number++;
+		else if($score>=$target) {
+			$style = $goodrow;
 		}
-		$row_number++;
-		$col_number = 0;
-		foreach($row as $s => $v) {
-			$t = $v['score']."/".$v['target'];
-			$sheet->setCellValueByColumnAndRow($col_number, $row_number, $t);
-			if($v['score']>=$v['target']) {
-				$style = $goodrow;
-			}
-			else {
-				$style = $badrow;
-			}
-			$sheet->getStyleByColumnAndRow($col_number, $row_number)->applyFromArray($style);
-			$col_number++;
+		else {
+			$style = $badrow;
 		}
-		$row_number++;
+		$sheet->setCellValueByColumnAndRow($col_number, $row_number+1, $score."/".$target);
+		$sheet->getStyleByColumnAndRow($col_number, $row_number+1)->applyFromArray($style);
+		$col_number++;
 	}
 
 	// Detail pages for pages with investigations

@@ -1,0 +1,47 @@
+#!/bin/sh
+. /etc/default/audibility
+YM=${1:-`date +%Y-%m`}
+Y=${YM:2:2}
+M=${YM:5:2}
+case $M in
+01 | 02 | 03)
+	if [ $Y -gt 10 ]
+	then
+		SEASON=B`expr $Y - 1`
+	else
+		SEASON=B0`expr $Y - 1`
+	fi
+	;;
+04 | 05 | 06 | 07 | 08 | 09 | 10)
+	SEASON=A$Y
+	;;
+11 | 12)
+	SEASON=B$Y
+esac
+PREFIX=daily_BBC$SEASON
+case $# in
+1)
+	FILES=${PREFIX}.`date -d $1 +%y%m%d`
+	;;
+3)
+	for i in `seq $2 $3`
+	do
+		D=$1-$i
+		FILES="$FILES ${PREFIX}."`date -d $D +%y%m%d`
+	done
+	;;
+*)
+	FILES=${PREFIX}.`date +%y%m%d`
+	;;
+esac
+cd ${IMPORT_PATH}/ibb
+for i in $FILES
+do
+    php /var/www/html/audibility/import_audibility_data.php $i
+    if [ $? -ne 0 ]
+    then
+      logger -p daemon.info IBB file $i cannot be added to database
+    else
+      logger -p daemon.info IBB file $i added to database ok
+    fi
+done

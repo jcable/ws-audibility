@@ -43,8 +43,8 @@ cd ${IMPORT_PATH}/ibb
 for i in $FILES
 do
   logger -p daemon.info fetching IBB monitoring file
-  echo wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@voa.his.com/pub/voa/private/merlin/$i"
-  if wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@voa.his.com/pub/voa/private/merlin/$i"
+  echo wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@${IBB_HOST}${IBB_PATH}/$i"
+  if wget -nv -a /var/log/audibility.log "ftp://${IBB_USER}:${IBB_PASSWORD}@${IBB_HOST}${IBB_PATH}/$i"
   then
     logger -p daemon.info IBB monitoring file $i fetched ok
     php /var/www/html/audibility/import_audibility_data.php $i

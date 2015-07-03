@@ -56,7 +56,7 @@ $stop_date = $q->stop_date;
 $month_name = $q->month_name;
 $map = get_target_areas();
 $regions = get_regions($map);
-$title = "Create Saved Audibility Report for $month_name ($season) Frozen on $freeze";
+$title = "Create Saved Audibility Report for $month_name ($season) Frozen on $freeze including $start_date and $stop_date";
 ?>
 <HTML>
 <HEAD>

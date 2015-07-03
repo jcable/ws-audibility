@@ -44,7 +44,7 @@ function show_detail_row($line)
     print "<TD>".$line["s"]."</TD>";
     print "<TD>".$line["d"]."</TD>";
     print "<TD>".$line["o"]."</TD>";
-    print "<TD>".(20*$line["o"])."</TD>";
+    print "<TD>".(20*$line["o"])."/".$line["target"]."</TD>";
     print "<TD>";
     if($line["aal"]=="t") {
         print "Y";
@@ -59,9 +59,12 @@ function show_detail_row($line)
 function show_detail_score($score_to_show)
 {
     global $freeze, $score;
-    print "<TR><TD CLASS=\"usedrow\" align=\"right\" colspan=\"6\">Average</TD><TD>$score_to_show</TD></TR>";
-    if($score!=-1)
+    if($score_to_show!=-1) {
+        print "<TR><TD CLASS=\"usedrow\" align=\"right\" colspan=\"6\">Average</TD><TD>$score_to_show</TD></TR>";
+    }
+    if($score!=-1) {
     	print "<TR><TD CLASS=\"usedrow\" align=\"right\" colspan=\"6\">Average Frozen at $freeze</TD><TD>$score</TD></TR>";
+    }
 }
 
 function show_detail_trailer($investigation)
@@ -79,14 +82,13 @@ if(isset($_GET["freeze"])) {
 }
 $ta=$_GET["ta"] or $ta = 'ARABA_GULF';
 $service=$_GET["service"] or $service= 'Arabic';
-$service_start=$_GET["service_start"] or $service_start = '03:00:00';
 $slot_start=$_GET["slot_start"] or $slot_start = '03:00:00';
 $target=$_GET["target"] or $target = 66;
 $score=$_GET["score"] or $score = 0;
-$date=$_GET["month"] or $date = '2013-02-01';
-$ymd = explode("-", $date);
-$season = get_season($ymd[0], $ymd[1]);
-$month = season_month($season, $ymd[1]);
+$year_number=$_GET["year"] or $year_number = 2014;
+$month_number=$_GET["month"] or $month_number = 11;
+$season = get_season($year_number, $month_number);
+$month = season_month($season, $month_number);
 
 $investigation = array(
 	"ta"=>$ta, "tan" => $ta,
@@ -105,11 +107,9 @@ else
 	$language = $service;
 	
  // retrieve in target observations
- $query = query_for_detail_aal($service, $ta, $service_start, $slot_start, $start_date, $stop_date, $freeze);
-
+ $query = query_for_detail_aal($service, $ta, $slot_start, $start_date, $stop_date, $freeze);
 
  $obs = fetch_query($query);
-
 
 ?>
 <HTML>
@@ -137,7 +137,7 @@ else
 <TD colspan="5">
 <?php
 	$query = "SET datestyle = 'DMY';";
-	$query .= query_for_aal($service, $season, $ta, $service_start);
+	$query .= query_for_aal($service, $season, $ta, $slot_start);
     	$sla = show_html_table("Service Level", "aal_tab", $query);
 	$network = $sla[0][9];
 ?>
@@ -163,7 +163,7 @@ else
 <TD></TD>
 <TD colspan="2">
 <?php
-	$mon_sched_query = "SELECT start, town, aal, language, stn, service FROM aal_mon"
+	$mon_sched_query = "SELECT start, town, service, aal_stn, other_stn FROM aal_mon"
 		." WHERE season='$season'"
 		." AND '$language' = ANY(language)"
 		." AND target_area = '$ta'"
